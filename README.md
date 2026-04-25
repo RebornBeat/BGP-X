@@ -1,78 +1,105 @@
 # BGP-X
 
-**BGP-X** is a **router-level privacy overlay network** that unifies multiple transport protocols and routing domains into a single, cryptographically enforced privacy plane.
+**BGP-X** is a router-level privacy overlay network. It runs on your network router and protects all connected devices transparently — or on a standalone device, or embedded directly in an application.
 
-It runs directly on your router (or as a dedicated node) and protects **all connected devices** without per-device configuration. It is **not** a per-application tool, **not** a VPN you connect to, and **not** a Tor fork.
-
-BGP-X uses the existing internet (BGP-routed) as a **dumb transport substrate** while building a parallel, identity-based, multi-hop overlay with onion encryption, decentralized discovery, and native mesh support.
+BGP-X does not replace the Border Gateway Protocol. It uses the public internet as a dumb transport substrate while implementing a parallel, privacy-first routing plane that is identity-based, multi-hop by default, and cryptographically enforced at every layer.
 
 ---
 
 ## Why BGP-X Exists
 
-Modern networks are fragmented:
+The internet's routing layer (BGP) was built for reachability, not privacy. Every packet you send leaks:
 
-- **BGP-routed internet** — reachability-focused, metadata-leaky
-- **Mesh networks** (WiFi 802.11s, LoRa, Bluetooth, etc.) — local, often no internet
-- **Tor** — strong anonymity, but TCP-only, application-layer proxy, centralized directory
-- **VPNs** — single-provider trust shift
-- **cjdns / Yggdrasil / Reticulum** — excellent pieces, but incomplete unification
+- **Your real IP** (your network identity)
+- **Your destination IP** (who you're talking to)
+- **Traffic patterns** (when, how much, what timing)
 
-BGP-X solves the unification problem:
+HTTPS solves content privacy. VPNs shift trust to a single provider. Tor provides unlinkability but with centralized directory authorities, fixed path length, TCP-only transport, and application-proxy architecture that limits what can be built on top of it.
 
-> **You should be able to communicate across any combination of protocols, networks, and infrastructures — such that no single party can link your identity to your destination — while retaining production-grade performance and router-level deployment.**
+BGP-X is built to solve a different problem:
+
+> **You should be able to communicate across the internet such that no single party — not your ISP, not your government, not the server you're talking to — can link you to your destination, without sacrificing the ability to build production-grade networked systems.**
 
 ---
 
 ## What BGP-X Is
 
-BGP-X is a **multi-protocol, router-level privacy overlay** with these core properties:
+BGP-X is a **router-level privacy overlay network** with the following design properties:
 
-- **Router-centric**: Runs as the routing stack on your router; protects every device on the LAN transparently
-- **Identity-based addressing**: Nodes and services identified by cryptographic public keys, not IP addresses
-- **Client-selected paths**: Sender chooses the relay path (including cross-protocol segments)
-- **Layered encryption**: Onion-encrypted packets; each relay decrypts only its layer
-- **DHT Pools**: Trust-segmented discovery with public, curated, private, and ephemeral pools
-- **Native mesh support**: WiFi 802.11s, LoRa, Bluetooth, Ethernet P2P, satellite — operates without ISP
-- **Gateway interoperability**: Audited exit nodes bridge mesh ↔ internet; double-exit architecture possible
-- **ECH at exits**: Hides domain name from SNI (when destination supports ECH)
-- **Pluggable transport**: Obfuscation layer for DPI resistance
-- **Geographic plausibility scoring**: RTT-based verification as reputation signal
-- **No central directory**: Fully decentralized DHT + signed pool advertisements
-
----
-
-## Core Unification (Our Selling Point)
-
-**Tor operates on the BGP-routed internet.**
-
-**BGP-X operates *between* protocol levels** — routing between:
-- BGP-routed internet
-- Mesh networks (WiFi, LoRa, Bluetooth, etc.)
-- Satellite links
-- Cellular
-- Private networks
-
-**Pools** enable this unification:
-- Public pools for open participation
-- Curated pools for trusted operators
-- Private pools for your own infrastructure
-- Ephemeral pools for one-off high-security sessions
-
-This allows mesh communities to connect to each other and to the internet through audited gateways while preserving strong unlinkability.
+- **Router-centric**: runs on your network router and protects all connected devices — no per-device configuration required
+- **Identity-based addressing**: nodes and services identified by cryptographic public keys, not IP addresses
+- **Client-selected paths**: the sender constructs the complete relay path before transmitting
+- **Layered onion encryption**: each relay decrypts only its own layer; no relay sees both source and destination
+- **No central directory**: decentralized DHT-based node discovery with signed peer advertisements
+- **DHT Pools**: configurable trust segments — public, curated, private, semi-private — enabling double-exit architecture and jurisdiction-specific routing
+- **Gateway interoperability**: designated exit nodes bridge the overlay to the existing internet
+- **Forward secrecy**: ephemeral session keys ensure past sessions cannot be decrypted
+- **Encrypted Client Hello (ECH)**: exit nodes support ECH to hide the destination domain name from SNI when the destination publishes ECH configuration
+- **Pluggable transport**: obfuscates BGP-X traffic patterns to resist ISP-level blocking
+- **Mesh transport native**: operates without any ISP connection via WiFi 802.11s, LoRa radio, Bluetooth, and other transports
+- **Cover traffic**: COVER packets are cryptographically indistinguishable from RELAY packets to external observers — both use the session key
+- **Geographic plausibility scoring**: RTT-based verification of node region claims (no external database required)
+- **path_id return routing**: 8-byte random path identifier enables return traffic routing without leaking path composition
 
 ---
 
 ## Deployment Modes
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| **Dual-Stack Router** | BGP + BGP-X coexist on one router | Most home/small business |
-| **BGP-X Only Router** | All traffic through overlay | Maximum privacy |
-| **Standalone Device** | Single-device protection | Laptop, phone, server |
-| **Mesh Node** | No ISP; pure mesh transport | Off-grid, community networks |
-| **Gateway Node** | Mesh ↔ Internet bridge | Connect mesh islands to clearnet |
-| **Broadcast Amplifier** | Range extension only; no routing | Extend coverage in remote areas |
+| Mode | Description | ISP Required |
+|---|---|---|
+| Dual-Stack Router | BGP + BGP-X coexist; routing policy decides per flow | Yes |
+| BGP-X Only Router | All LAN traffic through overlay; no bypass possible for LAN devices | Yes (as transport for overlay) |
+| Standalone Device | BGP-X daemon on single device | Yes |
+| Mesh Node | No ISP; mesh transport only (WiFi mesh, LoRa, Bluetooth) | No |
+| Gateway Node | Bridges mesh network to clearnet internet | Yes (at gateway) |
+| Broadcast Amplifier | Range extension only; no routing intelligence | No |
+
+---
+
+## Application Types
+
+| Type | Description | Configuration Required |
+|---|---|---|
+| Standard Application | Any app that doesn't use the SDK; transparently protected via router | None — just connect to the network |
+| BGP-X Native Application | Uses the SDK to control paths, pools, ECH; can register as native services | SDK integration |
+| Configuration Client | bgpx-cli and GUI tools; connects to daemon via Control Socket | Socket access |
+
+---
+
+## BGP and BGP-X Relationship
+
+BGP-X uses the BGP-routed internet as a transport layer. BGP-X packets are ordinary UDP datagrams from BGP's perspective — opaque, encrypted, indistinguishable from any other UDP traffic. BGP-X does not participate in BGP peering, does not announce routes, and does not require any ISP or infrastructure changes.
+
+For mesh deployments (Modes 4-6), BGP-X operates with zero BGP involvement for intra-mesh traffic. Coverage gaps between mesh islands are bridged via internet relay pools transparently and privately.
+
+---
+
+## BGP Replacement Spectrum
+
+BGP-X enables a spectrum of BGP independence depending on deployment:
+
+- **Level 0**: Pure overlay — BGP as full transport, BGP-X adds privacy only
+- **Level 1**: Intra-mesh routing — 100% BGP-free for local mesh traffic
+- **Level 2**: Mesh + clearnet via gateway — mesh users have zero direct BGP exposure
+- **Level 3**: Multi-island bridging — mesh islands connected through internet relay pools; users never directly exposed to BGP
+- **Level 4**: Dense multi-mode hybrid — all modes simultaneously, variable BGP dependence by position
+- **Level 5**: Wide-area mesh with aerial nodes — near-total BGP independence for intra-network
+- **Level 6**: Maximum — BGP-X replaces ISP routing decisions; honest limit: cannot replace physical infrastructure
+
+---
+
+## Prior Art
+
+BGP-X builds on significant prior work. It does not claim to be the first in any individual dimension:
+
+- **cjdns / Hyperboria**: public key addressing for overlay networks
+- **Yggdrasil Network**: DHT-based routing with public key identities
+- **Reticulum Network Stack**: multi-transport mesh networking designed for low-bandwidth links
+- **Tor**: multi-hop onion routing with clearnet exit nodes
+- **I2P**: garlic routing for anonymous services
+- **Meshtastic**: LoRa mesh hardware and protocol
+
+**What BGP-X uniquely combines**: multi-hop onion routing + mesh transport native + clearnet exit model + decentralized DHT discovery + pool-based trust domains + hardware targets — unified into one coherent system.
 
 ---
 
@@ -80,35 +107,55 @@ This allows mesh communities to connect to each other and to the internet throug
 
 | Property | Tor | BGP-X |
 |---|---|---|
-| Architecture | Fixed 3-hop circuit | Configurable multi-segment paths across protocols |
-| Discovery | Centralized directory authorities | Decentralized DHT + signed pools |
-| Transport | TCP only | Any IP + native mesh (WiFi, LoRa, BLE, satellite) |
-| Deployment | Application proxy | Router-level (protects all devices) |
-| Exit model | Volunteer exits | Audited, signed exit nodes with ECH |
-| Multiplexing | One circuit per stream | Native multiplexing over single path |
-| Cover traffic | Optional | Pluggable, uses session_key (indistinguishable from RELAY) |
-| Mesh support | No | Native |
-| ECH at exit | Partial | Yes (when destination supports) |
+| Architecture | Fixed 3-hop circuit | Variable N-hop path, client-configurable |
+| Directory model | Centralized directory authorities | Decentralized DHT + signed advertisements |
+| Transport | TCP streams | UDP-native with reliability layer |
+| Identity model | Single anonymous identity per circuit | Cryptographic identity; rotatable per session |
+| Path length | Fixed 3 hops | Configurable; no global enforcement maximum |
+| Congestion control | None (TCP passthrough) | Native BGP-X congestion and backpressure |
+| Multiplexing | Single stream per circuit | Native stream multiplexing over single path |
+| Exit model | Any volunteer relay can exit | Designated, signed, policy-publishing exit nodes |
+| Network layer | Application proxy (SOCKS5) | Full IP overlay via TUN interface |
+| BGP awareness | None | Uses BGP as transport; aware of coverage gaps |
+| Cover traffic | Optional, not default | Pluggable; uses session_key; externally indistinguishable |
+| Firmware support | No | Yes — router firmware targets |
+| Path trust model | Assumes 1 in 3 hops honest | Configurable; reputation-weighted selection |
+| DHT Pools | No | Yes — multi-pool paths, double-exit, trust tiers |
+| ECH at exit | No | Yes — hides SNI when destination supports it |
+| Mesh transport | No | Yes — WiFi mesh, LoRa, Bluetooth |
+| Hardware ecosystem | No | Yes — unified BGP-X Node platform |
 
 ---
 
 ## Architecture in One Diagram
 
 ```
-[LAN Devices] ──► [BGP-X Router Daemon]
-                     │
-          ┌──────────┼──────────┐
-          │   Routing Policy Engine   │
-          └──────────┼──────────┘
-                     │
-          ┌──────────┼──────────┐
-          │   Overlay Routing Layer   │ (onion + pools)
-          └──────────┼──────────┘
-                     │
-   Mesh Transport ───┼─── Internet Transport (BGP-routed)
-          │          │          │
-     [Mesh Island]  [Gateway]  [Clearnet]
+[All Devices on LAN]
+         ↓
+[BGP-X Router Daemon]
+  Routing Policy Engine decides per-flow:
+  ├── BGP-X overlay → Entry → Relay → Relay → Exit → Clearnet
+  └── Standard routing → Direct WAN → Clearnet
+         ↓
+[Three Interfaces]
+  ├── TUN (bgpx0): transparent IP capture
+  ├── SDK Socket: BGP-X native apps
+  └── Control Socket: bgpx-cli and management tools
 ```
+
+---
+
+## Known Limitations
+
+BGP-X is explicit about what it does not guarantee:
+
+- **Timing correlation**: all low-latency anonymous networks share this fundamental residual risk; cover traffic raises attacker cost but does not eliminate it
+- **ECH requires destination support**: destinations must publish ECH configuration in DNS HTTPS records
+- **Geographic plausibility is RTT-signal-based**: not cryptographic proof of node location
+- **ISP can observe BGP-X participation**: your ISP sees encrypted UDP/7474 traffic to BGP-X entry nodes; pluggable transport mitigates this
+- **Application-layer identity leakage**: BGP-X cannot prevent an app from revealing your identity via cookies, logins, or fingerprinting
+- **Compromised device**: BGP-X cannot protect traffic from malware on your device
+- **No legal protection**: BGP-X does not make illegal activities legal
 
 ---
 
@@ -116,113 +163,45 @@ This allows mesh communities to connect to each other and to the internet throug
 
 ```
 /bgp-x
-├── README.md
-├── ARCHITECTURE.md
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-├── CODE_OF_CONDUCT.md
-├── LICENSE
-├── SECURITY.md
-├── /docs
-│   ├── getting_started.md
-│   ├── architecture_overview.md
-│   ├── deployment_architecture.md
-│   ├── routing_policy.md
-│   ├── bgp_bgpx_coexistence.md
-│   ├── application_guide.md
-│   ├── mesh_architecture.md
-│   ├── ecosystem_unification.md
-│   ├── regulatory_framework.md
-│   └── faq.md
-├── /protocol
-│   ├── protocol_spec.md
-│   ├── packet_format.md
-│   ├── handshake.md
-│   ├── path_construction.md
-│   ├── pool_spec.md
-│   ├── pluggable_transport.md
-│   ├── path_quality_reporting.md
-│   ├── mesh_transport.md
-│   ├── pool_curator_key_rotation.md
-│   ├── error_handling.md
-│   └── versioning.md
-├── /control-plane
-│   ├── discovery.md
-│   ├── node_advertisement.md
-│   ├── routing_algorithm.md
-│   ├── geo_plausibility.md
-│   ├── reputation_system.md
-│   └── control_api.md
-├── /data-plane
-│   ├── forwarding.md
-│   ├── encryption_layers.md
-│   ├── congestion_control.md
-│   └── multiplexing.md
-├── /node
-│   ├── node.md
-│   └── api.md
-├── /gateway
-│   ├── gateway_spec.md
-│   ├── exit_node.md
-│   ├── entry_node.md
-│   └── bgp_interop.md
-├── /firmware
-│   └── firmware.md
-├── /client
-│   └── control_client.md
-├── /sdk
-│   └── sdk_spec.md
-├── /security
-│   ├── threat_model.md
-│   ├── attack_vectors.md
-│   ├── crypto_spec.md
-│   └── audit_plan.md
-├── /simulation
-│   ├── network_sim.md
-│   ├── attack_sim.md
-│   └── performance.md
-├── /deployment
-│   ├── bootstrap_nodes.md
-│   ├── node_setup.md
-│   ├── scaling.md
-│   ├── mesh_deployment.md
-│   ├── mast_tower_deployment.md
-│   ├── solar_deployment.md
-│   ├── aerial_deployment.md
-│   ├── vehicle_deployment.md
-│   ├── maritime_deployment.md
-│   ├── underground_deployment.md
-│   └── satellite_gateway_deployment.md
-├── /production
-│   ├── sop.md
-│   ├── node_certification.md
-│   └── release_process.md
-├── /legal
-│   ├── liability.md
-│   └── privacy_policy.md
-└── /hardware
-    ├── README.md
-    ├── node_spec.md
-    ├── gateway_spec.md
-    ├── amplifier_spec.md
-    ├── compatible_hardware.md
-    ├── meshtastic_adapter.md
-    └── manufacturing.md
+├── README.md                   — This file
+├── ARCHITECTURE.md             — Full system architecture
+├── CHANGELOG.md                — Version history
+├── CONTRIBUTING.md             — Contribution guidelines
+├── CODE_OF_CONDUCT.md          — Community standards
+├── LICENSE                     — Apache 2.0
+├── SECURITY.md                 — Vulnerability reporting
+├── /docs                       — User-facing documentation
+├── /protocol                   — Protocol specification
+├── /control-plane              — Routing logic and node management
+├── /data-plane                 — Packet forwarding and encryption
+├── /node                       — Node daemon specification
+├── /gateway                    — BGP interoperability layer
+├── /firmware                   — Router firmware targets
+├── /client                     — Configuration client specification
+├── /sdk                        — Developer SDK specification
+├── /security                   — Security model and auditing
+├── /simulation                 — Network and attack simulation
+├── /deployment                 — Deployment and operations guides
+├── /production                 — SOPs, certification, release
+├── /hardware                   — Hardware specifications
+└── /legal                      — Liability and privacy documentation
 ```
 
 ---
 
 ## Status
 
-BGP-X is in the **pre-implementation specification phase**.
+BGP-X is in **pre-implementation specification phase**.
 
-All documentation in this repository represents a complete system design intended to guide implementation. No production code has been written yet.
+All documentation represents a complete system design for v1 implementation. No features are deferred to future versions.
 
 Phase plan:
 
-- [x] System architecture (including router-centric model, pools, mesh, ECH)
-- [x] Protocol specification (including path_id, pool support, mesh transport, ECH)
-- [x] Security model (including pool threats, mesh threats)
+- [x] System architecture
+- [x] Protocol specification
+- [x] Security model
+- [x] Mesh architecture
+- [x] Hardware specification
 - [ ] Reference implementation (Rust)
 - [ ] Testnet
 - [ ] Mainnet
@@ -231,16 +210,13 @@ Phase plan:
 
 ## License
 
-Apache License 2.0. See [LICENSE](./LICENSE).
+MIT See [LICENSE](./LICENSE).
 
 ---
 
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
-
----
-
 ## Security
 
-To report a vulnerability, see [SECURITY.md](./SECURITY.md).
+To report a vulnerability, see [SECURITY.md](./SECURITY.m
