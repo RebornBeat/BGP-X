@@ -32,43 +32,52 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 | Relay node | A middle hop; knows only previous and next hop |
 | Exit node / Gateway | The final hop for clearnet traffic; knows destination, not client IP |
 | Path | An ordered sequence of nodes from entry to exit |
+| Segment | A portion of a path from one pool; paths may have multiple segments |
 | Stream | A logical bidirectional channel multiplexed over a path |
-| Session | The cryptographic context for communication between a client and a path |
-| Onion packet | A layered-encrypted packet that is progressively decrypted at each hop |
+| Session | The cryptographic context for communication between a client and one node |
+| Onion packet | A layered-encrypted packet progressively decrypted at each hop |
 | NodeID | BLAKE3(Ed25519_public_key) — 32 bytes |
 | ServiceID | Ed25519 public key of a BGP-X native service — 32 bytes |
+| path_id | 8-byte CSPRNG-generated identifier per path; enables return traffic routing |
+| Pool | A named, signed collection of nodes grouped by trust or operational intent |
+| Pool ID | BLAKE3 hash identifying a pool, 32 bytes |
+| Curator | Entity that signs pool advertisements and membership records |
 | Advertisement | A signed record published by a node to the DHT |
 | DHT | Distributed Hash Table used for node discovery |
+| PT | Pluggable Transport — traffic obfuscation layer below BGP-X |
 
 ---
 
 ## 3. Protocol Overview
 
-BGP-X defines two protocol layers:
-
 ### 3.1 Underlay (Transport)
 
-BGP-X runs over UDP/IP. All BGP-X packets are UDP datagrams. The protocol does not use TCP between relay nodes.
+BGP-X runs over UDP/IP for internet deployments. For mesh deployments, BGP-X runs over WiFi 802.11s, LoRa, Bluetooth BLE, or Ethernet point-to-point.
 
-Default BGP-X port: **7474/UDP**
+The protocol is transport-agnostic. All BGP-X messages have the same format regardless of transport.
+
+Default BGP-X port (UDP): **7474/UDP**
 
 Implementations MUST support IPv4. Implementations SHOULD support IPv6. Dual-stack operation is RECOMMENDED.
 
+For mesh transports, addressing uses NodeID rather than IP addresses. The mesh transport layer maps NodeIDs to transport-specific addresses.
+
 ### 3.2 Overlay (BGP-X Protocol)
 
-The BGP-X overlay protocol operates within UDP payloads. It defines:
+The BGP-X overlay protocol operates within transport payloads. It defines:
 
 - Packet types and their wire formats
-- Onion encryption structure
+- Onion encryption structure (including path_id field)
 - Session establishment and teardown
 - Stream multiplexing
-- Control plane messages (node advertisement, DHT operations)
+- Control plane messages (node advertisement, DHT operations, pool operations)
+- Mesh transport operations
 
 ---
 
 ## 4. Message Types
 
-BGP-X defines the following top-level message types. All messages are identified by a 1-byte type field in the outer header.
+BGP-X defines the following message types identified by a 1-byte type field in the outer header.
 
 | Type ID | Name | Direction | Description |
 |---|---|---|---|
@@ -88,7 +97,16 @@ BGP-X defines the following top-level message types. All messages are identified
 | 0x0E | DHT_GET_RESP | DHT → Any | Response to DHT_GET |
 | 0x0F | DHT_PUT | Any → DHT | Store a DHT record |
 | 0x10 | ERROR | Any → Any | Signal a protocol error |
-| 0x11 | COVER | Any → Any | Cover traffic (no payload) |
+| 0x11 | COVER | Any → Any | Cover traffic (indistinguishable from RELAY) |
+| 0x12 | DHT_POOL_ADVERTISE | Curator → DHT | Publish pool advertisement |
+| 0x13 | DHT_POOL_GET | Any → DHT | Retrieve a pool advertisement |
+| 0x14 | DHT_POOL_GET_RESP | DHT → Any | Response to DHT_POOL_GET |
+| 0x15 | NODE_WITHDRAW | Node → DHT | Signal node withdrawal from network |
+| 0x16 | PATH_QUALITY_REPORT | Node → Client | Report path quality (encrypted for client) |
+| 0x17 | PT_HANDSHAKE | Any → Any | Pluggable transport handshake |
+| 0x18 | MESH_BEACON | Node → Broadcast | Mesh network presence announcement |
+| 0x19 | MESH_FRAGMENT | Any → Any | Fragment of a larger BGP-X packet (low-MTU transports) |
+| 0x1A | POOL_KEY_ROTATION | Curator → DHT | Pool curator key rotation record |
 
 ---
 
@@ -105,7 +123,7 @@ Every BGP-X message begins with a common outer header:
 │                        Session ID                             │
 │                        (16 bytes)                             │
 ├───────────────────────────────────────────────────────────────┤
-│                       Sequence Number                         │
+│                    Outbound Sequence Number                    │
 │                         (8 bytes)                             │
 ├───────────────────────────────────────────────────────────────┤
 │                     Payload Length                            │
@@ -120,19 +138,32 @@ Every BGP-X message begins with a common outer header:
 |---|---|---|
 | Version | 1 byte | Protocol version. Current: 0x01 |
 | Msg Type | 1 byte | Message type identifier (see Section 4) |
-| Reserved | 2 bytes | MUST be 0x0000. Reserved for future use. |
+| Reserved | 2 bytes | MUST be 0x0000 |
 | Session ID | 16 bytes | Randomly generated per session. 0x00...00 for pre-session messages |
-| Sequence Number | 8 bytes | Monotonically increasing per session. Used for replay protection. |
+| Outbound Sequence Number | 8 bytes | Monotonically increasing for OUTBOUND direction only. Separate from inbound sequence space. |
 | Payload Length | 4 bytes | Length of the payload in bytes, big-endian |
 | Payload | Variable | Message-type-specific content |
 
+Total header size: **32 bytes**
+
 All multi-byte integer fields are big-endian (network byte order).
+
+### 5.1 Bidirectional Sequence Numbers
+
+Each session maintains TWO independent sequence number spaces:
+
+- **Outbound**: sequence numbers for packets sent by this node to the next hop
+- **Inbound**: sequence numbers for packets received from the previous hop
+
+The common header carries the outbound sequence number. The replay detection window tracks the inbound sequence space separately.
+
+This separation prevents nonce reuse even though the same session key is used for both directions.
 
 ---
 
 ## 6. RELAY Message
 
-The RELAY message is the primary data-forwarding message. It carries an onion-encrypted payload.
+The RELAY message is the primary data-forwarding message.
 
 ```
 Common Header (Msg Type = 0x01)
@@ -142,40 +173,96 @@ Common Header (Msg Type = 0x01)
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### Relay node behavior
+### Relay Node Behavior
 
 Upon receiving a RELAY message, a node MUST:
 
 1. Verify the outer header (Version, Reserved fields)
-2. Look up the session key associated with the Session ID
-3. If no session exists for this Session ID, drop the packet silently and log the event
-4. Attempt to decrypt the onion payload using the session key and the Sequence Number as the nonce
-5. If decryption fails (authentication tag mismatch), drop the packet silently and log the event
-6. Extract the next-hop NodeID and the remaining encrypted payload from the decrypted content
-7. Forward the remaining encrypted payload (with a new outer header for the next hop) to the next-hop node
+2. Look up the session key for the Session ID using the INBOUND sequence space
+3. If no session: drop silently, log internally
+4. Attempt decryption using session key and Outbound Sequence Number as nonce input
+5. If authentication tag mismatch: drop silently, log internally
+6. Extract path_id (bytes 1-8 of decrypted layer header — see Section 7)
+7. Record: `path_id → source_address` in-memory path table (TTL = session idle timeout)
+8. Extract next-hop address from decrypted layer header
+9. Forward remaining encrypted payload to next hop (with new outer header using node's outbound session to next hop)
 
 Relay nodes MUST NOT:
-
 - Log the source address of RELAY messages
-- Log the content of RELAY messages
+- Log path_id values
+- Log payload content
 - Attempt to decrypt more than their own layer
 - Modify the payload before forwarding
 
----
+### Cover Traffic Behavior
 
-## 7. HANDSHAKE Messages
-
-See `/protocol/handshake.md` for the full handshake specification. Summary:
-
-HANDSHAKE_INIT, HANDSHAKE_RESP, and HANDSHAKE_DONE form a 3-message handshake that establishes a shared session key between the client and each node in the path.
-
-The handshake uses X25519 ECDH with HKDF-SHA256 for key derivation. Handshake messages are sent to each node in the path independently and in sequence (entry first, then each relay, then exit).
+COVER packets (0x11) use the same session_key as RELAY packets. They MUST be processed identically to RELAY packets from a forwarding perspective. If the onion layer parse fails (random payload), the node drops silently — this is expected and correct. External observers cannot distinguish COVER from RELAY.
 
 ---
 
-## 8. DATA Message
+## 7. Onion Layer Structure
 
-The DATA message carries encrypted application data within an established session.
+The onion layer is the decrypted content of a RELAY message payload. After decryption at a relay node, the layer contains:
+
+```
+Byte offset:
+  0        Hop Type (1 byte)
+  1-40     Next Hop (40 bytes)
+  41-48    path_id (8 bytes) — return traffic routing identifier
+  49-52    Stream ID (4 bytes)
+  53-54    Flags (2 bytes)
+  55-56    Reserved (2 bytes, MUST be 0x0000)
+  57+      Remaining Ciphertext (for subsequent hops)
+```
+
+Total layer header: **57 bytes**
+
+### path_id Field
+
+The path_id (bytes 41-48) is:
+- Generated by the client using CSPRNG (8 bytes, 64 bits)
+- Unique per path instance
+- Included in EVERY onion layer of the same path
+- The same value at every hop of the same path
+- Never reused within a session
+- Not linked to any client identity
+- Not logged by any relay node
+
+When a relay decrypts its layer and extracts path_id, it stores `path_id → source_addr` in an in-memory table. This mapping enables return traffic routing without requiring the relay to know the full path structure.
+
+### Hop Type Values
+
+| Value | Meaning |
+|---|---|
+| 0x01 | Relay — forward to another BGP-X node |
+| 0x02 | Exit — forward to clearnet destination (IPv4) |
+| 0x03 | Exit — forward to clearnet destination (IPv6) |
+| 0x04 | Exit — forward to domain name (resolve at exit) |
+| 0x05 | Delivery — this is the final hop (BGP-X native service) |
+
+---
+
+## 8. HANDSHAKE Messages
+
+See `/protocol/handshake.md` for the full handshake specification.
+
+### Critical Structure: HANDSHAKE_INIT Two-Part Format
+
+HANDSHAKE_INIT MUST be structured as two parts:
+
+**Part 1 (Cleartext, 32 bytes)**: Client Ephemeral Public Key (X25519, 32 bytes)
+
+This MUST be cleartext because the receiving node needs the client's ephemeral public key to compute `dh1 = X25519(node_static_priv, client_ephemeral_pub)` before it can derive any key material to decrypt anything.
+
+This is NOT a security problem: the ephemeral public key is not secret (only the private key is secret, which never leaves the client).
+
+**Part 2 (Encrypted, variable)**: All other HANDSHAKE_INIT content, encrypted using `init_key` derived from `dh1`.
+
+Full wire format: see `/protocol/packet_format.md`.
+
+---
+
+## 9. DATA Message
 
 ```
 Common Header (Msg Type = 0x05)
@@ -185,52 +272,56 @@ Common Header (Msg Type = 0x05)
 │                    Flags (2 bytes)                            │
 ├───────────────────────────────────────────────────────────────┤
 │               Encrypted Application Data                      │
-│                      (variable)                               │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-| Field | Size | Description |
-|---|---|---|
-| Stream ID | 4 bytes | Identifies the stream within this session |
-| Flags | 2 bytes | See below |
-| Encrypted Data | Variable | Application payload, encrypted with session key |
-
-### Flags
+### Data Message Flags
 
 | Bit | Name | Description |
 |---|---|---|
 | 0 | FIN | Last data segment on this stream |
 | 1 | RST | Reset stream immediately |
-| 2 | SYN | First data segment on a new stream (stream open) |
-| 3–15 | Reserved | MUST be 0 |
+| 2 | SYN | First data segment on a new stream |
+| 8 | CONGESTION_MILD | Node queue above 75% capacity |
+| 9 | CONGESTION_SEVERE | Node queue above 90% capacity |
+| 10 | CONGESTION_CLEAR | Congestion resolved (queue below 50%) |
+| 3-7, 11-15 | Reserved | MUST be 0 |
+
+Congestion flags (bits 8-10) are set by relay nodes and encrypted within the onion layer. They are NOT visible to external observers. They reach the client via the return path.
 
 ---
 
-## 9. STREAM Messages
+## 10. STREAM Messages
 
 ### STREAM_OPEN (0x06)
-
-Opens a new multiplexed stream within an existing session.
 
 ```
 Common Header (Msg Type = 0x06)
 ├───────────────────────────────────────────────────────────────┤
 │                     Stream ID (4 bytes)                       │
+│  Bit 31: 0 = client-initiated (odd ID), 1 = service-init     │
 ├───────────────────────────────────────────────────────────────┤
-│                  Destination (variable)                       │
-│         (encrypted; contains target address and port)        │
+│                  Stream Type (1 byte)                         │
+│  0x01 = ORDERED, 0x02 = DATAGRAM                             │
+├───────────────────────────────────────────────────────────────┤
+│                  Stream Flags (2 bytes)                       │
+│  Bit 0: ECH_REQUIRED (fail if ECH not available)             │
+│  Bit 1: ECH_PREFERRED (use ECH if available)                 │
+├───────────────────────────────────────────────────────────────┤
+│                  Destination (variable, encrypted)            │
+│  Address type (1B): 0x04=IPv4, 0x06=IPv6, 0x0A=domain,      │
+│                     0xBB=BGP-X ServiceID                      │
+│  Address (variable)                                           │
+│  Port (2B)                                                    │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-The Destination field is encrypted under the session key. It contains:
-
-- Address type (1 byte): 0x04 = IPv4, 0x06 = IPv6, 0x0A = domain name, 0xBB = BGP-X ServiceID
-- Address (4, 16, or variable bytes depending on type)
-- Port (2 bytes, big-endian)
+**Stream ID Assignment Rules (MANDATORY)**:
+- Client-initiated streams: ODD IDs (1, 3, 5, ...). High bit (bit 31) = 0.
+- Service-initiated streams: EVEN IDs (2, 4, 6, ...). High bit (bit 31) = 1.
+- Violation: sender receives RST; error logged internally.
 
 ### STREAM_CLOSE (0x07)
-
-Closes a stream. Both parties MUST cease sending data on the stream after sending or receiving STREAM_CLOSE.
 
 ```
 Common Header (Msg Type = 0x07)
@@ -241,7 +332,7 @@ Common Header (Msg Type = 0x07)
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### Close Reasons
+Close Reasons:
 
 | Code | Meaning |
 |---|---|
@@ -251,216 +342,261 @@ Common Header (Msg Type = 0x07)
 | 0x0003 | Exit policy denied |
 | 0x0004 | Timeout |
 | 0x0005 | Protocol error |
+| 0x0006 | ECH required but not available |
+| 0x0007 | ECH negotiation failed |
 
 ---
 
-## 10. KEEPALIVE Message
-
-Maintains session liveness and prevents NAT timeout on the underlying UDP path.
+## 11. KEEPALIVE Message
 
 ```
 Common Header (Msg Type = 0x09)
 (No payload)
 ```
 
-Nodes MUST send KEEPALIVE messages every 25 seconds on idle sessions.
+Nodes MUST send KEEPALIVE messages at 25-second intervals on idle sessions, randomized within ±5 seconds. This randomization is MANDATORY (not optional) to prevent KEEPALIVE timing fingerprinting.
 
 Nodes MUST treat a session as dead if no KEEPALIVE or DATA message is received for 90 seconds and MUST tear down the session.
 
-KEEPALIVE messages SHOULD be sent at irregular intervals (randomized within ±5 seconds of the 25-second target) to resist timing fingerprinting.
+For sessions over satellite links, the keepalive timeout may be extended (configurable up to 5 minutes) to accommodate high-latency paths.
 
 ---
 
-## 11. DHT Messages
+## 12. DHT Messages
 
-### DHT_FIND_NODE (0x0B)
+See existing Section 11 from original spec for DHT message formats (DHT_FIND_NODE, DHT_FIND_NODE_RESP, DHT_PUT, DHT_GET, DHT_GET_RESP). These are unchanged.
 
-Query the DHT for nodes closest to a target NodeID.
+### DHT Storage Authentication Requirement
+
+Storage nodes MUST verify advertisement signatures before accepting a DHT_PUT:
+
+1. Parse the advertisement from the DHT_PUT payload
+2. Verify the signature using the advertisement's public_key field
+3. Verify node_id = BLAKE3(public_key)
+4. Verify timestamps are valid
+5. Reject and drop the DHT_PUT silently if any verification fails
+
+Implementations that accept unsigned or invalid records into DHT storage are non-compliant.
+
+---
+
+## 13. NODE_WITHDRAW Message (0x15)
+
+Signals that a node is voluntarily withdrawing from the network.
 
 ```
-Common Header (Msg Type = 0x0B)
+Common Header (Msg Type = 0x15, Session ID = 0x00...00)
 ├───────────────────────────────────────────────────────────────┤
-│                   Target NodeID (32 bytes)                    │
+│                   NodeID (32 bytes)                           │
 ├───────────────────────────────────────────────────────────────┤
-│               Max Results (1 byte, 1–20)                      │
+│                   Withdraw Timestamp (8 bytes, uint64, Unix)  │
+├───────────────────────────────────────────────────────────────┤
+│                   Signature (64 bytes, Ed25519)               │
+│   Signs: BLAKE3("bgpx-withdrawal-v1" || node_id || timestamp) │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### DHT_FIND_NODE_RESP (0x0C)
+On receiving NODE_WITHDRAW, storage nodes MUST:
+1. Verify the signature using the NodeID's public key (fetched from their cached advertisement)
+2. If valid: immediately remove the node advertisement from DHT storage
+3. Propagate the withdrawal to 5 nearest DHT peers
+
+On receiving NODE_WITHDRAW, routing nodes MUST:
+1. Remove the node from their DHT routing table k-buckets
+2. Remove the node from their path-eligible node database
+
+Nodes MUST publish NODE_WITHDRAW before graceful shutdown.
+
+---
+
+## 14. PATH_QUALITY_REPORT Message (0x16)
+
+Carries a path quality report from a relay node to the client. This message travels on the return path, encrypted for the client only.
 
 ```
-Common Header (Msg Type = 0x0C)
+Common Header (Msg Type = 0x16)
 ├───────────────────────────────────────────────────────────────┤
-│              Result Count (1 byte)                            │
-├───────────────────────────────────────────────────────────────┤
-│           NodeContact entries (Result Count × 40 bytes)       │
+│              Encrypted Report Payload (16 bytes, fixed)       │
+│              Encrypted using client's session key for         │
+│              this hop                                         │
+│                                                               │
+│  Decrypted content:                                           │
+│    Byte 0: hop_latency_bucket                                 │
+│      0x00 = <50ms, 0x01 = 50-150ms, 0x02 = 150-300ms,       │
+│      0x03 = >300ms                                            │
+│    Byte 1: congestion_flag                                    │
+│      0x00 = none, 0x01 = mild, 0x02 = severe                 │
+│    Bytes 2-15: padding (random, for size normalization)       │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-NodeContact entry (40 bytes):
+PATH_QUALITY_REPORT is always exactly 16 bytes of payload (after encryption tag). It is sent by relay nodes that support the path_quality_reporting extension (extension flag bit 3).
 
-| Field | Size | Description |
-|---|---|---|
-| NodeID | 32 bytes | BLAKE3 hash of node's public key |
-| IP Address | 4 bytes | IPv4 address of the node |
-| Port | 2 bytes | UDP port |
-| Reserved | 2 bytes | Future use |
+Intermediate relays forward PATH_QUALITY_REPORT opaquely via path_id routing. They do NOT decrypt it.
 
-### DHT_PUT (0x0F)
+Only the exit node and the client can generate and consume PATH_QUALITY_REPORT content. This prevents path composition leakage.
 
-Store a node advertisement record in the DHT.
+---
+
+## 15. MESH_BEACON Message (0x18)
+
+Broadcast by mesh nodes to announce their presence and enable bootstrap without internet connectivity.
 
 ```
-Common Header (Msg Type = 0x0F)
+Common Header (Msg Type = 0x18, Session ID = 0x00...00)
+├───────────────────────────────────────────────────────────────┤
+│                   NodeID (32 bytes)                           │
+├───────────────────────────────────────────────────────────────┤
+│                   Ed25519 Public Key (32 bytes)               │
+├───────────────────────────────────────────────────────────────┤
+│              Transports Supported (1 byte bitmask)            │
+│    Bit 0: UDP/IP  Bit 1: WiFi mesh  Bit 2: LoRa              │
+│    Bit 3: BLE     Bit 4: Ethernet P2P                         │
+├───────────────────────────────────────────────────────────────┤
+│              DHT Routing Table Size (2 bytes, uint16)         │
+├───────────────────────────────────────────────────────────────┤
+│              Timestamp (8 bytes, uint64, Unix epoch)          │
+├───────────────────────────────────────────────────────────────┤
+│              Signature (64 bytes)                             │
+│   Signs: NodeID || PublicKey || TransportsMask ||             │
+│           RoutingTableSize || Timestamp                       │
+└───────────────────────────────────────────────────────────────┘
+```
+
+MESH_BEACON is broadcast on all active mesh transports every 30 seconds.
+
+Receiving nodes MUST verify the signature before adding the sender to their DHT routing table.
+
+---
+
+## 16. MESH_FRAGMENT Message (0x19)
+
+For mesh transports with small MTU (particularly LoRa), BGP-X packets that exceed the transport MTU are fragmented at the transport layer.
+
+```
+Common Header (Msg Type = 0x19, Session ID = 0x00...00)
+├───────────────────────────────────────────────────────────────┤
+│              Original Packet ID (4 bytes, random)             │
+├───────────────────────────────────────────────────────────────┤
+│              Fragment Number (1 byte, 0-indexed)              │
+├───────────────────────────────────────────────────────────────┤
+│              Total Fragments (1 byte, 1-16)                   │
+├───────────────────────────────────────────────────────────────┤
+│              Fragment Payload (variable)                      │
+└───────────────────────────────────────────────────────────────┘
+```
+
+- Fragmentation occurs BEFORE BGP-X header construction for the original packet
+- Maximum 16 fragments per packet
+- Fragment timeout: 10 seconds — if not all fragments received, discard and log
+- Reassembly produces a complete BGP-X packet for normal processing
+- packet_id is 4 bytes random per original packet (unique for reassembly tracking)
+- MTU limits by transport: LoRa SF7 ~200 bytes usable, LoRa SF12 ~50 bytes usable
+
+---
+
+## 17. POOL_KEY_ROTATION Message (0x1A)
+
+See `/protocol/pool_curator_key_rotation.md` for full specification. Wire format summary:
+
+```
+Common Header (Msg Type = 0x1A, Session ID = 0x00...00)
 ├───────────────────────────────────────────────────────────────┤
 │              Record Length (4 bytes)                          │
 ├───────────────────────────────────────────────────────────────┤
-│           Signed Node Advertisement Record                    │
-│                     (variable)                                │
-└───────────────────────────────────────────────────────────────┘
-```
-
-### DHT_GET (0x0D)
-
-Retrieve a node advertisement record by NodeID.
-
-```
-Common Header (Msg Type = 0x0D)
-├───────────────────────────────────────────────────────────────┤
-│                   Target NodeID (32 bytes)                    │
-└───────────────────────────────────────────────────────────────┘
-```
-
-### DHT_GET_RESP (0x0E)
-
-```
-Common Header (Msg Type = 0x0E)
-├───────────────────────────────────────────────────────────────┤
-│              Found (1 byte): 0x01 = found, 0x00 = not found  │
-├───────────────────────────────────────────────────────────────┤
-│              Record Length (4 bytes, if Found = 0x01)         │
-├───────────────────────────────────────────────────────────────┤
-│           Signed Node Advertisement Record                    │
-│               (variable, present if Found = 0x01)            │
+│              Canonical JSON of rotation record (variable)     │
+│              (max 4096 bytes)                                 │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 12. ERROR Message
+## 18. Node Advertisement Record
 
-Signals a protocol error. Nodes MAY send ERROR messages; they MUST NOT rely on receiving them.
+Node advertisements are JSON documents stored in DHT and retrieved by clients during path construction.
 
-```
-Common Header (Msg Type = 0x10)
-├───────────────────────────────────────────────────────────────┤
-│                Error Code (2 bytes)                           │
-├───────────────────────────────────────────────────────────────┤
-│           Error Message (UTF-8, max 256 bytes)                │
-└───────────────────────────────────────────────────────────────┘
-```
-
-See `/protocol/error_handling.md` for the full error code table.
-
----
-
-## 13. COVER Message
-
-Cover traffic. The COVER message carries no meaningful payload and is used to disrupt traffic analysis.
-
-```
-Common Header (Msg Type = 0x11)
-├───────────────────────────────────────────────────────────────┤
-│              Padding (random bytes, variable length)          │
-└───────────────────────────────────────────────────────────────┘
-```
-
-COVER messages MUST be indistinguishable in size from real traffic. The padding length SHOULD be drawn from the same distribution as real payloads on the same session.
-
-Nodes MUST NOT log the receipt of COVER messages.
-
-Relay nodes MUST forward COVER messages identically to RELAY messages — they must not be dropped or flagged.
-
----
-
-## 14. Node Advertisement Record
-
-Node advertisements are the primary unit of node discovery in BGP-X. They are stored in the DHT and retrieved by clients during path construction.
-
-### Structure
+### Complete Structure
 
 ```json
 {
   "version": 1,
   "node_id": "<32-byte BLAKE3 hash, hex>",
   "public_key": "<32-byte Ed25519 public key, base64url>",
-  "roles": ["relay"],
+  "roles": ["relay", "entry"],
   "endpoints": [
+    { "protocol": "udp", "address": "203.0.113.1", "port": 7474 }
+  ],
+  "mesh_endpoints": [
     {
-      "protocol": "udp",
-      "address": "203.0.113.1",
-      "port": 7474
+      "transport": "wifi_mesh",
+      "mesh_id": "bgpx-community-mesh-1",
+      "mac_address": "aa:bb:cc:dd:ee:ff"
+    },
+    {
+      "transport": "lora",
+      "lora_addr": "0xAABBCCDD",
+      "frequency_mhz": 868.0,
+      "spreading_factor": 7,
+      "bandwidth_khz": 125
     }
   ],
   "exit_policy": null,
+  "exit_policy_version": null,
   "bandwidth_mbps": 100,
   "latency_ms": 12,
   "uptime_pct": 99.1,
-  "region": "NA",
-  "country": "US",
+  "region": "EU",
+  "country": "DE",
   "asn": 12345,
-  "operator_id": "<32-byte Ed25519 public key of operator, base64url>",
-  "signed_at": "2026-04-24T00:00:00Z",
-  "expires_at": "2026-04-25T00:00:00Z",
-  "signature": "<64-byte Ed25519 signature over canonical JSON, base64url>"
+  "operator_id": "<base64url Ed25519 public key>",
+  "pool_memberships": ["pool-id-1", "pool-id-2"],
+  "pt_supported": ["obfs4"],
+  "ech_capable": false,
+  "is_gateway": false,
+  "gateway_for_mesh": null,
+  "provides_clearnet_exit": false,
+  "link_quality_profiles": {
+    "lora": { "latency_class": 2, "bandwidth_class": 1 }
+  },
+  "withdrawn": false,
+  "withdrawn_at": null,
+  "protocol_versions_min": 1,
+  "protocol_versions_max": 1,
+  "extensions": {
+    "cover_traffic": true,
+    "multiplexing": true,
+    "path_quality_reporting": true,
+    "pluggable_transport": true,
+    "ech_support": false,
+    "geo_plausibility": true,
+    "pool_support": true,
+    "mesh_transport": true,
+    "advertisement_withdrawal": true,
+    "session_rehandshake": true
+  },
+  "signed_at": "2026-04-24T12:00:00Z",
+  "expires_at": "2026-04-25T12:00:00Z",
+  "signature": "<base64url Ed25519 signature>"
 }
 ```
 
-### Field Definitions
+### New Fields (beyond original spec)
 
-| Field | Required | Description |
+| Field | Type | Description |
 |---|---|---|
-| version | REQUIRED | Advertisement format version. Currently 1. |
-| node_id | REQUIRED | BLAKE3(public_key). 32 bytes, hex-encoded. |
-| public_key | REQUIRED | Ed25519 public key. 32 bytes, base64url. |
-| roles | REQUIRED | Array of: "relay", "entry", "exit", "discovery". At least one required. |
-| endpoints | REQUIRED | Array of network endpoints where the node accepts connections. |
-| exit_policy | CONDITIONAL | Required if roles includes "exit". See exit policy specification. |
-| bandwidth_mbps | RECOMMENDED | Self-reported available bandwidth in Mbps. |
-| latency_ms | RECOMMENDED | Self-reported round-trip latency to nearest major internet exchange, in ms. |
-| uptime_pct | RECOMMENDED | Self-reported uptime percentage over the past 30 days. |
-| region | REQUIRED | Two-letter region code: NA, EU, AP, SA, AF, ME. |
-| country | REQUIRED | ISO 3166-1 alpha-2 country code. |
-| asn | REQUIRED | Autonomous System Number of the node's network. |
-| operator_id | RECOMMENDED | Ed25519 public key of the operator. Allows reputation tracking across nodes. |
-| signed_at | REQUIRED | ISO 8601 timestamp of when the advertisement was signed. |
-| expires_at | REQUIRED | ISO 8601 timestamp. MUST be no more than 48 hours after signed_at. |
-| signature | REQUIRED | Ed25519 signature over the canonical JSON of all other fields. |
+| mesh_endpoints | array | Transport-specific mesh addresses (WiFi mesh MAC, LoRa addr) |
+| exit_policy_version | uint16 | Incremented on any exit policy change; clients re-fetch on version change |
+| pool_memberships | array of strings | Pool IDs this node is currently a member of |
+| pt_supported | array of strings | Pluggable transports supported (e.g., ["obfs4"]) |
+| ech_capable | boolean | Whether this exit node supports ECH (requires exit role) |
+| is_gateway | boolean | Whether this node bridges mesh to clearnet |
+| gateway_for_mesh | array of strings | Mesh IDs this gateway serves |
+| provides_clearnet_exit | boolean | Separate from is_gateway; confirms clearnet exit capability |
+| link_quality_profiles | object | Per-transport latency_class and bandwidth_class |
+| withdrawn | boolean | If true, node is being withdrawn; triggers propagation |
+| withdrawn_at | string | ISO 8601 timestamp of withdrawal |
 
-### Canonical JSON for Signing
-
-Before signing, the advertisement MUST be serialized as canonical JSON:
-
-- All keys sorted alphabetically
-- No whitespace (compact encoding)
-- The "signature" field MUST be excluded from the signed content
-- UTF-8 encoding
-
-### Signature Verification
-
-Receivers MUST:
-
-1. Recompute node_id = BLAKE3(public_key) and verify it matches the node_id field
-2. Verify the signature over the canonical JSON using the public_key field
-3. Verify that signed_at is not in the future (allowing 60 seconds of clock skew)
-4. Verify that expires_at has not passed
-5. Reject the advertisement if any verification step fails
-
----
-
-## 15. Exit Policy
-
-Nodes with the "exit" role MUST include a signed exit policy in their advertisement.
+### Exit Policy Object (Updated)
 
 ```json
 {
@@ -470,129 +606,162 @@ Nodes with the "exit" role MUST include a signed exit policy in their advertisem
   "deny_destinations": ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"],
   "logging_policy": "none",
   "operator_contact": "operator@example.com",
-  "jurisdiction": "US",
-  "policy_signed_at": "2026-04-24T00:00:00Z",
-  "policy_signature": "<Ed25519 signature>"
+  "jurisdiction": "DE",
+  "dns_mode": "doh",
+  "dns_resolver": "https://dns.quad9.net/dns-query",
+  "dnssec_validation": true,
+  "ecs_handling": "strip",
+  "ech_capable": true,
+  "policy_version": 1,
+  "policy_previous_version": 0,
+  "policy_signed_at": "2026-04-24T12:00:00Z",
+  "policy_signature": "<Ed25519 signature by operator_id key>"
 }
 ```
 
+New exit policy fields:
+
 | Field | Description |
 |---|---|
-| allow_protocols | Protocols the gateway will forward: "tcp", "udp", or both |
-| allow_ports | List of destination ports the gateway will forward. Use [0] for all ports. |
-| deny_destinations | CIDR blocks the gateway will never forward to. Private IP ranges MUST be included. |
-| logging_policy | "none" (no logs kept), "metadata" (timing/destination logged), "full" (all traffic logged) |
-| operator_contact | Public contact for the gateway operator |
-| jurisdiction | ISO 3166-1 country code of the legal jurisdiction the operator is subject to |
-| policy_signed_at | Timestamp of policy signing |
-| policy_signature | Ed25519 signature over canonical JSON of policy fields |
-
-Gateways MUST adhere to their published exit policy. Gateways that are observed violating their exit policy SHOULD be reported and will be flagged in the reputation system.
+| dns_mode | "doh", "dot", "system", "custom" |
+| dns_resolver | URL or IP of DNS resolver |
+| dnssec_validation | Whether DNSSEC is validated |
+| ecs_handling | "strip" (mandatory), "pass", "anonymize" |
+| ech_capable | Whether exit supports ECH |
+| policy_version | Monotonically increasing version number |
+| policy_previous_version | Previous version for transition tracking |
 
 ---
 
-## 16. Replay Protection
+## 19. Replay Protection
 
-All BGP-X messages carry a Sequence Number in the common header. Recipients MUST maintain a sliding window of received sequence numbers per session.
+Each session maintains TWO independent 64-sequence-number sliding windows:
 
-- Window size: 64 sequence numbers
-- A message whose sequence number falls outside the window or has already been received MUST be dropped silently
-- The window advances as new valid messages are received
+- **Outbound window**: tracks sequence numbers this node sends (prevents outbound replay)
+- **Inbound window**: tracks sequence numbers this node receives (prevents inbound replay)
 
----
+Initial sequence numbers are random (CSPRNG, uint64). Window size: 64 positions.
 
-## 17. MTU and Fragmentation
-
-BGP-X does not perform IP fragmentation. The maximum BGP-X payload size is chosen to fit within a standard MTU:
-
-- Target path MTU: 1280 bytes (minimum IPv6 MTU; safe for all paths)
-- BGP-X overhead (header + encryption): approximately 120 bytes
-- Maximum application payload per packet: 1160 bytes
-
-For application data that exceeds this limit, the stream layer MUST fragment the data across multiple packets and reassemble at the receiver.
-
----
-
-## 18. Protocol State Machine
-
-### 18.1 Node state machine
+Replay detection is applied to the INBOUND window for received packets:
 
 ```
-         ┌──────────┐
-         │  INITIAL │
-         └────┬─────┘
-              │ Start node daemon
-              ▼
-         ┌──────────┐
-         │BOOTSTRAP │  ← DHT join, publish advertisement
-         └────┬─────┘
-              │ Bootstrap complete
-              ▼
-         ┌──────────┐
-         │  ACTIVE  │  ← Accept connections, relay traffic
-         └────┬─────┘
-              │ Shutdown signal
-              ▼
-         ┌──────────┐
-         │  DRAIN   │  ← Complete in-flight sessions
-         └────┬─────┘
-              │ All sessions closed
-              ▼
-         ┌──────────┐
-         │   STOP   │
-         └──────────┘
-```
-
-### 18.2 Session state machine (per node, per session)
-
-```
-         ┌──────────────┐
-         │   NO SESSION │
-         └──────┬───────┘
-                │ Receive HANDSHAKE_INIT
-                ▼
-         ┌──────────────┐
-         │ HANDSHAKING  │
-         └──────┬───────┘
-                │ HANDSHAKE_DONE received and verified
-                ▼
-         ┌──────────────┐
-         │  ESTABLISHED │  ← Relay RELAY/DATA/KEEPALIVE messages
-         └──────┬───────┘
-                │ Timeout or ERROR
-                ▼
-         ┌──────────────┐
-         │    CLOSED    │
-         └──────────────┘
+if seq > inbound_max:
+    advance inbound window, mark seq as received
+    return ACCEPT
+elif inbound_max - seq >= 64:
+    return REJECT("Too old")
+elif inbound_window.bit_set(inbound_max - seq):
+    return REJECT("Replay detected")
+else:
+    inbound_window.set_bit(inbound_max - seq)
+    return ACCEPT
 ```
 
 ---
 
-## 19. Compliance Requirements
+## 20. MTU and Fragmentation
 
-A BGP-X-compliant implementation MUST:
+BGP-X MUST NOT fragment packets at the BGP-X protocol layer (above transport).
+
+Maximum BGP-X packet size: **1280 bytes** (targeting minimum IPv6 MTU for UDP transport)
+
+BGP-X overhead: approximately 120 bytes (header + encryption)
+
+Maximum application payload per packet: **1160 bytes**
+
+For mesh transports with smaller MTU, the MESH_FRAGMENT mechanism (message type 0x19) handles fragmentation at the transport layer, below the BGP-X packet level.
+
+Oversized packets received at any node MUST be dropped silently. The sender MUST ensure compliance with the MTU before transmission.
+
+| Transport | MTU Available | Notes |
+|---|---|---|
+| UDP/IP | 1280 bytes | BGP-X target MTU |
+| WiFi 802.11s | 1280 bytes | Same as UDP/IP |
+| LoRa SF7 | ~200 bytes usable | Requires MESH_FRAGMENT |
+| LoRa SF12 | ~50 bytes usable | Requires MESH_FRAGMENT |
+| Bluetooth BLE | 100-200 bytes | Requires MESH_FRAGMENT |
+| Ethernet P2P | 1500 bytes | BGP-X target MTU still applies |
+
+---
+
+## 21. Protocol State Machine
+
+### 21.1 Node State Machine
+
+```
+INITIAL → BOOTSTRAP → ACTIVE → DRAIN → STOP
+```
+
+On DRAIN entry: publish NODE_WITHDRAW; wait up to 30 seconds for propagation; then stop accepting new handshakes and drain existing sessions.
+
+### 21.2 Session State Machine (per session)
+
+```
+NO SESSION → HANDSHAKING → ESTABLISHED → CLOSED
+```
+
+---
+
+## 22. Extension Flags
+
+Extension flags are negotiated during handshake (HANDSHAKE_INIT extensions field, HANDSHAKE_RESP accepted extensions):
+
+| Bit | Extension | v1 |
+|---|---|---|
+| 0 | Cover traffic support | Yes |
+| 1 | Pluggable transport support | Yes |
+| 2 | Stream multiplexing | Yes |
+| 3 | Path quality reporting | Yes |
+| 4 | ECH support (exit nodes) | Yes |
+| 5 | Geographic plausibility scoring | Yes |
+| 6 | Pool support | Yes |
+| 7 | Mesh transport support | Yes |
+| 8 | Advertisement withdrawal | Yes |
+| 9 | Session re-handshake | Yes |
+| 10-31 | Reserved | — |
+
+---
+
+## 23. Compliance Requirements
+
+### MUST
 
 - Implement all message types in Section 4
-- Implement the common header format in Section 5
-- Implement the onion encryption scheme described in `/protocol/packet_format.md`
-- Implement the handshake protocol described in `/protocol/handshake.md`
-- Implement replay protection as described in Section 16
-- Respect the MTU limits in Section 17
-- Implement the state machines in Section 18
-- Verify all node advertisement signatures before using a node
-- Implement geographic and ASN diversity enforcement in path selection
-- Never log client source IPs at relay or exit nodes
+- Implement common header (Section 5) with bidirectional sequence numbers
+- Implement onion encryption scheme from `/protocol/packet_format.md` with path_id field
+- Implement handshake from `/protocol/handshake.md` with two-part HANDSHAKE_INIT
+- Implement replay protection (Section 19) with separate inbound/outbound windows
+- Respect MTU limits (Section 20)
+- Implement state machines (Section 21)
+- Verify all node advertisement signatures before using or storing
+- Enforce geographic and ASN diversity in path selection
+- Verify DHT_PUT advertisement signatures before storing (Section 12)
+- Implement path_id extraction and path table management
+- Implement NODE_WITHDRAW propagation
+- Implement POOL_KEY_ROTATION verification
+- Implement KEEPALIVE randomization (±5 seconds, Section 11)
+- Implement two independent sequence number spaces (Section 5.1)
+- Log PROHIBITED items: NEVER log client IPs at relay/exit, NEVER log destinations at relay nodes, NEVER log path_id, NEVER log path composition, NEVER log session IDs, NEVER log traffic volume per path
+- For exit nodes: implement DoH DNS resolution with DNSSEC validation and ECS stripping
+- For exit nodes: implement ECH when ech_capable=true
 
-A BGP-X-compliant implementation SHOULD:
+### MUST NOT
+
+- Log prohibited items (see above)
+- Allow disabling signature verification
+- Allow disabling replay protection
+- Attempt to decrypt onion layers beyond this node's own layer
+- Log relay packet source addresses
+- Reuse (session_key, nonce) pairs
+- Use a separate cover_key (COVER uses session_key)
+
+### SHOULD
 
 - Support IPv6
 - Support cover traffic generation
 - Support pluggable transport
-- Implement the reputation system described in `/control-plane/reputation_system.md`
-
-A BGP-X-compliant implementation MUST NOT:
-
-- Allow disabling of signature verification
-- Allow disabling of replay protection
-- Log relay packet source addresses
-- Attempt to decrypt onion layers beyond its own
+- Implement reputation system
+- Implement geographic plausibility scoring
+- Support pool-based path construction
+- Support mesh transport on appropriate hardware
+- Implement session re-handshake for sessions exceeding 24 hours
