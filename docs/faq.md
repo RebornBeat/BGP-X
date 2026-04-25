@@ -6,7 +6,7 @@
 
 ### What is BGP-X?
 
-BGP-X is a privacy-preserving, identity-routed overlay routing network. It routes your internet traffic through a chain of encrypted relay nodes such that no single party can see both where your traffic comes from and where it is going.
+BGP-X is a router-level privacy overlay network. It runs on your network router and protects all connected devices transparently — routing their traffic through a chain of encrypted relay nodes such that no single party can see both where traffic comes from and where it is going.
 
 It is not a replacement for BGP (Border Gateway Protocol) — it uses the existing internet as a transport layer and builds a private routing layer on top of it.
 
@@ -14,60 +14,133 @@ It is not a replacement for BGP (Border Gateway Protocol) — it uses the existi
 
 ### Is BGP-X a VPN?
 
-No. A VPN routes your traffic through a single server operated by a single provider. That provider sees your source IP, your destination, and all unencrypted content. You are trading ISP surveillance for VPN provider surveillance.
+No. A VPN routes your traffic through a single server operated by a single provider. That provider sees your source IP, your destination, and all unencrypted content.
 
-BGP-X routes traffic through a chain of multiple independent nodes. No single node sees both where you are and where you are going. There is no single provider to trust — trust is cryptographically distributed across the path.
+BGP-X routes traffic through a chain of multiple independent nodes selected from a decentralized DHT. No single node sees both where you are and where you are going. There is no single provider to trust.
 
 ---
 
 ### Is BGP-X a Tor fork?
 
-No. BGP-X shares the concept of multi-hop onion routing with Tor but differs fundamentally in:
+No. BGP-X shares the concept of multi-hop onion routing with Tor but differs fundamentally:
 
 - **Discovery**: BGP-X uses a fully decentralized DHT; Tor uses centralized directory authorities
-- **Path length**: BGP-X supports configurable N-hop paths; Tor uses a fixed 3-hop circuit
-- **Transport**: BGP-X uses UDP with a custom reliability layer; Tor uses TCP
-- **Network integration**: BGP-X operates at the IP layer natively; Tor is a SOCKS5 proxy
+- **Path length**: BGP-X supports configurable paths (no global enforcement maximum); Tor uses fixed 3-hop circuits
+- **Transport**: BGP-X uses UDP native with reliability layer; Tor uses TCP only
+- **Network integration**: BGP-X operates at IP layer via TUN interface; Tor is a SOCKS5 proxy
 - **Multiplexing**: BGP-X multiplexes multiple streams per path; Tor creates one circuit per connection
+- **Pools**: BGP-X has pool-based trust domains with double-exit architecture; Tor has no equivalent
+- **ECH**: BGP-X exit nodes support ECH; Tor does not
+- **Mesh transport**: BGP-X operates without ISP via radio mesh; Tor is internet-only
+- **Hardware ecosystem**: BGP-X has a unified hardware platform; Tor has no hardware
 
-See `docs/comparison.md` for a full side-by-side comparison.
+---
+
+### Does BGP-X replace BGP?
+
+No. BGP-X uses the BGP-routed internet as a transport layer. It does not participate in BGP peering, does not announce routes, and requires no ISP cooperation.
+
+For mesh deployments (no ISP), BGP-X provides an alternative to BGP routing for intra-community traffic. Coverage gaps between mesh islands are bridged via internet relay pools. BGP is still used as physical transport where internet connectivity exists.
+
+---
+
+### Is BGP-X the first mesh network?
+
+No. BGP-X builds on significant prior art:
+
+- **cjdns / Hyperboria**: public key addressing for overlay networks
+- **Yggdrasil Network**: DHT-based routing with cryptographic identities
+- **Reticulum Network Stack**: multi-transport mesh for low-bandwidth links
+- **Meshtastic**: demonstrated LoRa mesh hardware and community adoption
+
+**What BGP-X uniquely provides**: the combination of multi-hop onion routing + mesh transport + clearnet exit + decentralized DHT + pool-based trust domains + hardware targets in one coherent system.
 
 ---
 
 ### Is BGP-X ready to use?
 
-BGP-X is currently in the **pre-implementation specification phase**. All documentation describes the complete system design. Reference implementation in Rust is the next phase. There is no production software to download or install yet.
+BGP-X is currently in **pre-implementation specification phase**. All documentation describes the complete system design. Reference implementation in Rust is the next phase.
 
 ---
 
-### Why UDP instead of TCP?
+## Architecture
 
-TCP is a stateful, ordered, reliable transport. Those properties are useful for the application layer — but they add overhead and complexity at the relay layer.
+### How does BGP-X work on a router?
 
-BGP-X relays do not need ordered delivery or connection state. They need to:
-
-1. Receive a packet
-2. Decrypt one layer
-3. Forward to the next hop
-
-UDP is the right primitive for this. BGP-X implements a lightweight reliability layer above UDP for streams that require it (e.g., stream ordering for application data), but the relay path itself is connectionless and stateless.
+The BGP-X daemon runs alongside your router's standard network stack. When a packet arrives from a LAN device, the routing policy engine decides whether it routes through the BGP-X overlay or directly to the internet. BGP-X traffic enters the TUN interface (bgpx0), gets onion-encrypted by the daemon, and exits as encrypted UDP to the first relay node. All of this is transparent to the LAN devices.
 
 ---
 
-### Does BGP-X replace DNS?
+### What are the three interfaces the daemon exposes?
 
-No. BGP-X includes a resolution layer (for mapping service names to BGP-X service identities), but this does not replace DNS for clearnet access. When you access a clearnet destination through a BGP-X gateway, the gateway resolves the domain name via its own DNS resolver before connecting to the destination server.
+**TUN (bgpx0)**: virtual network interface. Traffic routed here is captured for overlay routing. Applications need no modification.
+
+**SDK Socket** (`/var/run/bgpx/sdk.sock`): BGP-X native applications connect here to access overlay capabilities explicitly (path constraints, service registration, pool selection, ECH requirements).
+
+**Control Socket** (`/var/run/bgpx/control.sock`): bgpx-cli and GUI tools connect here for management (status, statistics, routing policy, pools, reputation).
 
 ---
 
-### What does BGP-X not protect against?
+### What is a DHT Pool?
 
-BGP-X is explicit about its limitations:
+A pool is a named, signed collection of BGP-X nodes grouped by trust level or operational purpose.
 
-- **Compromised client device**: If malware or spyware is on your device, it can observe your traffic before BGP-X encrypts it.
-- **Application-layer identity leakage**: If you log into a service with your real username, the service knows who you are. BGP-X cannot fix that.
-- **Global traffic correlation**: A sufficiently powerful adversary who can observe the full public internet can attempt to correlate when traffic enters the overlay and when it exits. This is a known limitation of all low-latency anonymity networks.
-- **Exit node observation of clearnet traffic**: The exit gateway knows the destination IP. If you connect to a clearnet service without HTTPS, the exit node can also read the content.
+Instead of using one flat pool of all relays, you can structure paths across multiple pools:
+
+- **Public pool**: open DHT, any node can join
+- **Curated pool**: a curator signs membership; elevated trust signal
+- **Private pool**: your own nodes; membership not published; maximum trust
+- **Semi-private pool**: discoverable but restricted join
+
+Example: "Use relays from the default public pool, but exit through my private exit nodes."
+
+Pools enable the **double-exit architecture**: two independent exit pools in sequence, so no single exit node sees both the path origin and the destination.
+
+---
+
+### Can I use my own servers as BGP-X exit nodes and route through them privately?
+
+Yes. Create a private pool containing your servers. Configure your path constraints to use that pool as the exit segment. Your servers will only be used by clients who know the pool configuration (since it's private). Path segments before your servers come from the public pool, so even your exit servers don't see the origin.
+
+---
+
+### What does path_id do?
+
+path_id is an 8-byte random identifier assigned to each path at construction time. It is included in every onion layer of that path.
+
+When a relay node decrypts its onion layer, it records `path_id → predecessor_address` in memory. When return traffic arrives referencing that path_id, the relay forwards it toward the predecessor without decrypting it.
+
+This enables bidirectional sessions without leaking path composition to intermediate relays. Relays see path_id but not the actual path structure or node identities of other hops.
+
+---
+
+### What is a Broadcast Amplifier?
+
+Mode 6. A simple device with a single radio that receives BGP-X mesh packets and rebroadcasts them. No routing intelligence, no DHT participation, no encryption or decryption. Just physics — extending radio range.
+
+Uses: extending LoRa mesh coverage over hills or obstacles; bridging short gaps between mesh segments.
+
+Hardware: minimal (STM32H7 microcontroller + LoRa radio + PoE power), under 800mW, outdoor weatherproof.
+
+---
+
+### Can I use more than 4 hops?
+
+Yes. BGP-X has no global enforcement maximum. The default is 4 hops. You can configure any value. The daemon logs a soft warning above 10 hops but does not enforce a limit.
+
+Higher hops means more latency and higher anonymity. Choose based on your threat model.
+
+---
+
+### What is Geographic Plausibility Scoring?
+
+BGP-X cannot verify that a node's claimed region/country is accurate (there's no authority to check against). Instead, BGP-X measures the round-trip time (RTT) to each node via KEEPALIVE timing and compares it to the expected range for the node's claimed region.
+
+A node claiming to be in Europe that responds in 400ms from a European client is suspicious (EU-EU should be 8-120ms). This discrepancy generates a reputation penalty (GEO_SUSPICIOUS or GEO_IMPLAUSIBLE events).
+
+This is not a hard exclusion — it's a reputation signal. Nodes with persistent geographic implausibility accumulate reputation penalties over time.
+
+Mesh nodes have separate thresholds since LoRa hops can be 100ms-5s by design.
 
 ---
 
@@ -75,153 +148,128 @@ BGP-X is explicit about its limitations:
 
 ### How does onion encryption work?
 
-When you send a packet through a 4-hop path (entry → relay 1 → relay 2 → exit), the client wraps the packet in 4 encryption layers:
+For a 4-hop path (entry → relay 1 → relay 2 → exit), the client wraps the packet in 4 layers:
 
 ```
-Layer 4 (outermost): encrypted for Entry Node
+Layer 4 (outermost): encrypted for Entry
   Layer 3: encrypted for Relay 1
     Layer 2: encrypted for Relay 2
-      Layer 1 (innermost): encrypted for Exit Node
+      Layer 1 (innermost): encrypted for Exit
+        [destination + payload]
 ```
 
-The entry node decrypts layer 4, sees "forward to relay 1," and forwards the still-encrypted packet (layers 1–3). Relay 1 decrypts layer 3. Relay 2 decrypts layer 2. The exit node decrypts the final layer and sees the destination.
+Each layer also includes the path_id (8 bytes). The entry decrypts layer 4, sees next hop is Relay 1 and path_id, stores path_id → client, forwards the still-encrypted inner layers. And so on.
 
-Each layer is encrypted using a session key derived from a Diffie-Hellman key exchange between the client and that specific node. No node can decrypt any layer other than its own.
+Each layer is encrypted using a session key derived from a Diffie-Hellman key exchange between the client and that specific node.
+
+---
+
+### Does BGP-X hide the domain name I'm connecting to?
+
+Partially. BGP-X hides your IP from the destination and hides the destination from your ISP. The exit node must connect to the destination via TLS, which normally includes the Server Name Indication (SNI) — the domain name in plaintext.
+
+**Encrypted Client Hello (ECH)** hides the domain name from SNI when:
+- The destination publishes an ECH configuration in its DNS HTTPS record
+- The exit node is ECH-capable
+
+With ECH: the exit node (and network observers between exit and destination) see only the destination IP, not the domain name.
+
+Without ECH: the exit node sees the domain name in the TLS ClientHello SNI.
 
 ---
 
 ### What cryptographic algorithms does BGP-X use?
 
-| Function | Algorithm | Reason |
-|---|---|---|
-| Signatures | Ed25519 | Fast, compact, well-audited |
-| Key exchange | X25519 | State-of-the-art ECDH |
-| Symmetric encryption | ChaCha20-Poly1305 | Fast without AES-NI; authenticated |
-| Hashing | BLAKE3 | High performance; modern design |
-| KDF | HKDF-SHA256 | Standard, well-specified |
+| Function | Algorithm |
+|---|---|
+| Signatures | Ed25519 |
+| Key exchange | X25519 |
+| Symmetric encryption | ChaCha20-Poly1305 |
+| Hashing | BLAKE3 |
+| KDF | HKDF-SHA256 |
+
+COVER packets use the same session_key as RELAY packets — they are externally indistinguishable to any observer.
+
+No separate cover_key is derived.
 
 ---
 
-### How are nodes discovered?
+### Can I use Meshtastic hardware with BGP-X?
 
-BGP-X uses a Kademlia-style DHT (Distributed Hash Table). Nodes publish signed advertisements to the DHT. These advertisements include the node's public key, roles, performance data, and a self-signed timestamp.
+Yes, via an adaptation layer. Meshtastic devices (ESP32 or nRF52840 + LoRa radio) are too constrained to run the full BGP-X daemon. However, they can serve as **LoRa radio modems** for a BGP-X router (Raspberry Pi, GL.iNet router, etc.) connected via USB.
 
-Clients query the DHT for nodes matching their path selection criteria. The DHT has no central operator. Any node can participate in the DHT.
+The BGP-X daemon sends and receives raw LoRa packets via the Meshtastic device's serial interface. A BGP-X-specific firmware for the ESP32/nRF52840 removes the Meshtastic protocol and exposes raw LoRa mode.
 
----
-
-### What is a NodeID?
-
-A NodeID is derived deterministically from a node's public key:
-
-```
-NodeID = BLAKE3(Ed25519_public_key)
-```
-
-NodeIDs are 32 bytes (256 bits). They are used as DHT keys for node advertisement lookup and as identifiers in path construction.
+See `/hardware/meshtastic_adapter.md` for details.
 
 ---
 
-### What is the difference between an entry node and a relay node?
+### What is the BGP Replacement Spectrum?
 
-An entry node is the first hop in your path. It is the only node that sees your real IP address. It does not see your destination.
+A framework describing how much BGP-X can replace ISP-level BGP routing depending on deployment:
 
-A relay node is a middle hop. It sees only its immediate predecessor and successor. It knows neither your IP nor your destination.
-
-In practice, a single node daemon can serve both roles depending on how it is configured and how it is selected by clients.
-
----
-
-### What is an exit node / gateway?
-
-The gateway is the last hop in your path for clearnet traffic. It is the only node that sees the destination IP. It does not know your real IP address — it only knows the previous relay.
-
-The gateway connects to the public internet and sends your traffic to the destination on your behalf. Responses from the destination are received by the gateway and relayed back through the path to you.
-
----
-
-### Can I run a BGP-X node on a home internet connection?
-
-Relay nodes can run on home connections, but with caveats:
-
-- Many home ISPs use CG-NAT (carrier-grade NAT), which makes your node unreachable from the public internet without port forwarding.
-- Home IP addresses are often dynamic, which affects node advertisement stability.
-- Bandwidth limitations affect how much relay traffic you can handle.
-
-Exit nodes / gateways should be run on dedicated, stable, public IP addresses — preferably in a data center or colocation facility.
-
----
-
-### What is the minimum hardware to run a relay node?
-
-The relay node daemon is lightweight. Minimum:
-
-- 1 CPU core
-- 512 MB RAM
-- 10 Mbps symmetric bandwidth (100+ Mbps recommended)
-- Stable public IP address
-
-The dominant resource constraint for relay nodes is network bandwidth, not CPU or RAM.
-
----
-
-### How does path construction ensure geographic diversity?
-
-The client's path selection algorithm enforces:
-
-- No two nodes in the same Autonomous System (ASN)
-- No two nodes in the same country
-- Configurable additional diversity constraints (e.g., maximum path latency, minimum geographic spread)
-
-ASN and country information comes from the node's signed advertisement. Nodes that misrepresent their ASN or country are detectable via the reputation system when their routing behavior is inconsistent with their advertisement.
+- **Level 0**: pure overlay, BGP unchanged — BGP-X adds privacy only
+- **Level 1**: intra-mesh routing — 100% BGP-free for local mesh traffic
+- **Level 2**: mesh + gateway — mesh users have zero direct BGP exposure
+- **Level 3**: multi-island bridging — islands connected via internet relay pools; individuals never directly exposed
+- **Level 4**: dense multi-mode hybrid — variable by position
+- **Level 5**: aerial/satellite mesh — near-total BGP independence
+- **Level 6**: maximum — BGP-X replaces ISP routing decisions; honest limit: cannot replace physical infrastructure
 
 ---
 
 ## Operations
 
-### Can I use BGP-X with my existing VPN?
+### How does a LAN device access the BGP-X router daemon's SDK socket?
 
-Yes. BGP-X and a VPN can be layered:
-
+Option A — SSH socket forwarding (recommended):
+```bash
+ssh -L /tmp/bgpx-router.sock:/var/run/bgpx/sdk.sock user@router
 ```
-BGP-X overlay → gateway → VPN → internet
-```
-
-or
-
-```
-BGP-X overlay → gateway → internet
+Then in your application:
+```rust
+let client = Client::connect(Path::new("/tmp/bgpx-router.sock")).await?;
 ```
 
-If both BGP-X and a VPN are active, the ISP sees only encrypted VPN traffic. The VPN provider sees encrypted BGP-X traffic. The BGP-X entry node sees the VPN provider's IP (not your real IP). This provides additional protection against entry node observation but adds latency.
+Option B — Router exposes TCP endpoint (configure in daemon):
+```toml
+[sdk_api]
+tcp_listen = "192.168.1.1:7475"
+tcp_auth_required = true
+```
 
----
-
-### Will BGP-X work on my router?
-
-BGP-X firmware support is in development for OpenWrt-compatible routers. When available, this allows all devices on your network to route through BGP-X without per-device configuration.
-
-See `/firmware/firmware.md` for supported hardware targets and installation guidance.
-
----
-
-### How do I know if a gateway is trustworthy?
-
-BGP-X gateways publish a signed exit policy that specifies:
-
-- What traffic they will forward
-- Whether they log any data (and what)
-- Operator identity
-- Jurisdiction
-
-The exit policy is signed with the gateway's private key and verifiable by anyone. Clients can filter gateways by exit policy criteria before path selection.
-
-A gateway that claims a no-log policy cannot be forced to produce logs it never collected. However, you should verify that the gateway's jurisdiction and operator reputation support that claim. This is the same trust calculus as evaluating a VPN provider — with the significant difference that BGP-X does not depend on a single gateway's honesty for privacy (the entry node does not know the destination, and the gateway does not know the source).
+Option C — If your app doesn't need path control or service registration, just run it as a standard application. The router transparently routes its traffic through the overlay with no SDK required.
 
 ---
 
 ### What should I do if I find a malicious node?
 
-Report it through the reputation system and to the BGP-X project maintainers. Malicious nodes can be blacklisted in client software via signed revocation records published to the DHT.
+Report it through the BGP-X reputation system. Nodes can be flagged in the DHT via signed blacklist records. The reputation system aggregates these as advisory signals (not automatic exclusions by default).
 
-If the node is operating an exit gateway, include the specific malicious behavior (e.g., TLS interception, traffic modification) in your report. See `SECURITY.md` for the vulnerability reporting process.
+Blacklist a node locally via:
+```bash
+bgpx-cli nodes blacklist <node_id> --reason "suspected MITM"
+```
+
+Enable global blacklist enforcement (opt-in):
+```toml
+[reputation]
+enforce_global_blacklist = true
+```
+
+For malicious exit gateways violating their exit policy, include specific behavior in the report (TLS interception, traffic modification). See `SECURITY.md` for the vulnerability reporting process.
+
+---
+
+### Can I use BGP-X with my existing VPN?
+
+Yes. They can be layered:
+```
+BGP-X overlay → gateway → VPN → internet
+```
+Or:
+```
+BGP-X overlay → gateway → internet (BGP-X alone)
+```
+
+If both are active, the ISP sees VPN traffic. The VPN provider sees encrypted BGP-X traffic. The BGP-X entry node sees the VPN provider's IP. This provides additional protection against entry node observation but adds latency.
