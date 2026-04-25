@@ -1,28 +1,32 @@
-# BGP-X Compared to Existing Privacy Networks
+# BGP-X Compared to Existing Privacy and Mesh Networks
 
-This document provides a detailed technical comparison of BGP-X against the four most relevant existing systems: Tor, VPN, I2P, and SCION.
+This document provides a detailed technical comparison of BGP-X against the most relevant existing systems.
 
 ---
 
 ## Summary Table
 
-| Property | BGP-X | Tor | VPN | I2P | SCION |
-|---|---|---|---|---|---|
-| Multi-hop routing | ✅ N hops | ✅ Fixed 3 | ❌ 1 hop | ✅ Variable | ✅ Path-aware |
-| Decentralized discovery | ✅ DHT | ❌ Directory authorities | ❌ Single provider | ✅ Netdb | ✅ ISD-based |
-| Client-selected paths | ✅ Full | ⚠️ Partial (guard pinning) | ❌ None | ✅ Yes | ✅ Yes |
-| UDP-native transport | ✅ Yes | ❌ TCP only | ⚠️ Protocol-dependent | ✅ Yes | ✅ Yes |
-| Network-layer integration | ✅ TUN interface | ⚠️ SOCKS5 proxy | ✅ TUN interface | ⚠️ Limited | ✅ Yes |
-| Stream multiplexing | ✅ Native | ❌ One circuit per stream | ✅ Yes | ✅ Yes | ✅ Yes |
-| Configurable path length | ✅ Yes | ❌ Hardcoded 3 | ❌ N/A | ⚠️ Limited | ✅ Yes |
-| Router firmware support | ✅ Yes | ❌ No | ✅ Yes | ❌ No | ❌ No |
-| Clearnet access | ✅ Via gateways | ✅ Via exit nodes | ✅ All traffic | ⚠️ Limited | ⚠️ Gateway-dependent |
-| Native service hosting | ✅ Yes | ✅ Hidden services | ❌ No | ✅ Yes | ✅ Yes |
-| Cover traffic support | ✅ Pluggable | ❌ No | ❌ No | ⚠️ Partial | ❌ No |
-| No central authority | ✅ Yes | ❌ Directory authorities | ❌ Provider | ✅ Yes | ⚠️ ISD trust model |
-| Forward secrecy | ✅ Yes | ✅ Yes | ⚠️ Depends on impl | ⚠️ Partial | ✅ Yes |
-| Requires ISP cooperation | ❌ No | ❌ No | ❌ No | ❌ No | ✅ Yes |
-| Resistance to global passive adversary | ⚠️ Partial (cover traffic helps) | ⚠️ Partial | ❌ ISP sees all | ⚠️ Partial | ⚠️ Partial |
+| Property | BGP-X | Tor | VPN | I2P | cjdns | Reticulum | SCION |
+|---|---|---|---|---|---|---|---|
+| Multi-hop routing | ✅ N hops | ✅ Fixed 3 | ❌ 1 hop | ✅ Variable | ❌ None | ❌ None | ✅ Path-aware |
+| Onion routing | ✅ Yes | ✅ Yes | ❌ No | ✅ Garlic | ❌ No | ❌ No | ❌ No |
+| Decentralized discovery | ✅ DHT | ❌ Directory authorities | ❌ Single provider | ✅ Netdb | ✅ Partial | ✅ Yes | ⚠️ ISD model |
+| Clearnet exit model | ✅ Signed gateways | ✅ Exit nodes | ✅ All traffic | ⚠️ Outproxies | ❌ No | ❌ No | ⚠️ Gateway-dep |
+| Mesh transport native | ✅ Yes | ❌ No | ❌ No | ❌ No | ✅ Yes | ✅ Yes | ❌ No |
+| LoRa transport | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No | ✅ Yes | ❌ No |
+| Pool-based trust domains | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| Double-exit architecture | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| Configurable path length | ✅ Yes | ❌ Hardcoded 3 | ❌ N/A | ⚠️ Limited | ❌ No | ❌ No | ✅ Yes |
+| UDP-native transport | ✅ Yes | ❌ TCP only | ⚠️ Protocol-dep | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| Network-layer (TUN) | ✅ Yes | ❌ SOCKS5 proxy | ✅ Yes | ⚠️ Limited | ✅ Yes | ❌ No | ✅ Yes |
+| Stream multiplexing | ✅ Native | ❌ One circuit/stream | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| ECH at exit | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| Router firmware support | ✅ Yes | ❌ No | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
+| Hardware ecosystem | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No |
+| No central authority | ✅ Yes | ❌ Directory auths | ❌ Provider | ✅ Yes | ⚠️ Partial | ✅ Yes | ⚠️ ISD model |
+| Forward secrecy | ✅ Yes | ✅ Yes | ⚠️ Impl-dep | ⚠️ Partial | ❌ No | ✅ Yes | ✅ Yes |
+| Requires ISP cooperation | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No | ❌ No | ✅ Yes |
+| ISP-free operation | ✅ Mesh modes | ❌ No | ❌ No | ❌ No | ✅ Yes | ✅ Yes | ❌ No |
 
 ---
 
@@ -30,86 +34,75 @@ This document provides a detailed technical comparison of BGP-X against the four
 
 ### Where they agree
 
-Both BGP-X and Tor are built on the same foundational insight: **no single node should be able to see both the origin and destination of a connection**. Both use layered encryption (onion routing) to enforce this. Both provide forward secrecy. Both are open-source and designed to resist surveillance.
+Both BGP-X and Tor are built on the same foundational insight: no single node should see both origin and destination. Both use layered onion encryption. Both provide forward secrecy. Both are open-source.
 
-### Where BGP-X goes further
+### Decentralized Discovery
 
-#### 1. Decentralized discovery (no directory authorities)
+**Tor**: Hard-coded directory authorities (~9 servers) publish a signed consensus of all relays. Known fixed targets for legal coercion, DDoS, and subversion. Geographic and jurisdictional concentration.
 
-**Tor**: Uses a small set of hard-coded directory authorities (currently ~9) that collectively publish a signed consensus document describing all active relays. This creates a structural centralization risk:
+**BGP-X**: Fully decentralized DHT. No consensus document, no directory authority. Clients verify all advertisements cryptographically. Even if every bootstrap node fails, the DHT continues operating via existing routing tables.
 
-- The directory authorities are known, fixed targets for legal coercion, DDoS, and subversion
-- If a majority of directory authorities are compromised, the relay list can be manipulated
-- Directory authorities have geographic and jurisdictional concentration
+### Path Length
 
-**BGP-X**: Uses a Kademlia-style DHT for node advertisement. Every node publishes a self-signed advertisement. There is no consensus document and no directory authority. A client that discovers even one DHT node can find all others through the DHT's routing algorithm. There is no single entity to coerce, subpoena, or DDoS in order to degrade the network's anonymity set.
+**Tor**: Fixed 3 hops. All users have identical path structure — aids traffic analysis. No mechanism for a high-risk user to use more hops without modifying Tor internals.
 
-#### 2. Variable path length
+**BGP-X**: Default 4 hops. No global enforcement maximum. Applications choose based on threat model. High-security use cases use 6-7 hops with geographic diversity enforcement.
 
-**Tor**: All circuits are exactly 3 hops. This is a deliberate design choice to balance anonymity and latency. However, it also means all users have identical path structure, which can aid traffic analysis. There is no mechanism for a high-risk user to use a 5-hop path without modifying Tor internals.
+### Pool-Based Trust
 
-**BGP-X**: Path length is a first-class configuration parameter. The default is 4 hops. High-risk use cases can use 5, 6, or 7 hops. The path selection API exposes length, geographic diversity constraints, and trust thresholds. This allows the same protocol to serve both general-purpose browsing and high-security communications without protocol modification.
+**Tor**: No equivalent concept. All relays come from one directory-authority-controlled pool.
 
-#### 3. UDP-native transport
+**BGP-X**: Named pools with curator signatures enable trust isolation. Multi-segment paths use different pools per segment. Double-exit architecture uses two independent exit pools in sequence — no single exit operator sees both path origin and destination.
 
-**Tor**: Tor wraps everything in TCP connections between relays. This means Tor cannot natively carry UDP traffic (DNS queries, VoIP, gaming). UDP-over-Tor is not supported by the base protocol. Additionally, TCP connections between relays carry identifiable fingerprints.
+### Transport Layer
 
-**BGP-X**: The relay protocol runs over UDP natively. BGP-X carries any IP traffic — TCP, UDP, ICMP, or custom protocols. For application streams that require ordered delivery, BGP-X provides a reliability layer. For fire-and-forget UDP applications, no overhead is added.
+**Tor**: TCP only. Cannot natively carry UDP traffic. Inherits TCP fingerprinting.
 
-#### 4. Network-layer integration
+**BGP-X**: UDP native. Carries all IP protocols. Custom reliability layer for streams that need ordered delivery. No TCP fingerprinting of the relay protocol.
 
-**Tor**: Tor Browser and the Tor daemon provide SOCKS5 proxy interfaces. Applications must be explicitly configured to use SOCKS5. Applications that do not support SOCKS5 (e.g., system daemons, non-browser applications) require complex workarounds (iptables rules, torsocks wrapper, Whonix-style OS integration).
+### Network Integration
 
-**BGP-X**: The BGP-X client exposes a TUN interface. The operating system routes IP traffic into this interface the same way it routes traffic to a physical network adapter. Any application — including those with no network privacy awareness — routes through BGP-X transparently. This is the same model as a VPN client, extended with the privacy properties of onion routing.
+**Tor**: SOCKS5 proxy. Applications must explicitly support and be configured for SOCKS5. System daemons, command-line tools, and SOCKS5-unaware apps require complex workarounds.
 
-#### 5. Stream multiplexing
+**BGP-X**: TUN interface. Any application — including SOCKS5-unaware — routes transparently through the overlay. Same model as a VPN, but with multi-hop privacy properties.
 
-**Tor**: Each TCP stream creates or reuses a circuit. A typical browser session (loading a single web page) may involve dozens of TCP connections, each potentially requiring its own circuit setup or sharing a circuit in ways that can correlate streams.
+### ECH
 
-**BGP-X**: Multiple streams are multiplexed over a single path using a stream ID in the packet header. Path setup is amortized across all streams in a session. This reduces overhead and eliminates the inter-stream correlation risk that arises when streams share a Tor circuit.
+**Tor**: No exit-level ECH support. TLS ClientHello SNI visible to exit nodes and network observers.
 
-#### 6. Router firmware integration
+**BGP-X**: Exit nodes query DNS HTTPS records for ECH configuration. When available, the TLS ClientHello uses ECH, hiding the domain name from SNI. Even the exit node cannot see the domain name from the ClientHello.
 
-**Tor**: Tor is a user-space daemon designed for individual devices. Running Tor at the router level requires significant custom configuration and is not officially supported on commodity router firmware.
+### Mesh Transport
 
-**BGP-X**: BGP-X is designed with router firmware as a first-class deployment target. The node daemon is implemented to run within the memory and CPU constraints of commodity OpenWrt-capable routers. When BGP-X runs at the router level, all devices on the network segment are protected without per-device configuration — the same user experience as a VPN router, with genuine multi-hop privacy.
+**Tor**: Internet-only. No radio or mesh transport. Requires ISP connectivity.
+
+**BGP-X**: WiFi 802.11s, LoRa, Bluetooth BLE, Ethernet P2P. Communities can operate BGP-X mesh networks with zero ISP involvement for intra-mesh traffic.
 
 ---
 
 ## BGP-X vs. VPN
 
-### The fundamental VPN problem
+### The Fundamental VPN Problem
 
-A VPN provides one hop of trust displacement. Instead of your ISP seeing your traffic, your VPN provider sees it. The VPN provider knows:
+A VPN provides one hop of trust displacement. The VPN provider knows: your real IP, every destination, timing and volume, and plaintext content for non-HTTPS connections.
 
-- Your real IP address
-- Every destination you connect to
-- Timing and volume of all your traffic
-- Plaintext content (for non-HTTPS connections)
+If the VPN provider is compromised, subpoenaed, or malicious, all of that data is available to the adversary. No amount of "no-log policy" changes the fundamental architecture.
 
-If the VPN provider is compromised, subpoenaed, or malicious, all of that data is available to the adversary.
+### BGP-X's Approach
 
-### BGP-X's approach
+BGP-X distributes trust across N independent nodes. No single node has the complete picture. To reconstruct the source-destination link, an adversary must control both entry and exit of the same path simultaneously — prevented by pool-based operator diversity enforcement.
 
-BGP-X distributes trust across N independent nodes. No single node has the complete picture. To reconstruct the source-destination link, an adversary must control multiple nodes simultaneously **and** they must be in the same path **and** they must be both the entry and exit of that path.
+Additionally, BGP-X node operators have no business relationship with users. No payment data, no account, no email linking a user to their BGP-X activity.
 
-Additionally, BGP-X node operators do not have a business relationship with users. There is no payment data, no account, no email address linking a user to their BGP-X activity.
+### Pool-Based Exit Control
 
-### When a VPN is still appropriate
+VPNs offer no equivalent to BGP-X's pool-based routing. With BGP-X private pools, you can route exit traffic through infrastructure you control — with the path segments before the exit coming from the public pool (so even your own exit node doesn't see the origin). VPNs cannot provide this architecture.
 
-VPNs are appropriate when:
+### When a VPN Is Still Appropriate
 
-- You trust the VPN provider and want a simple, low-latency solution
-- Your threat model is ISP surveillance only (not an adversary who can subpoena VPN logs)
-- You need consistent exit IP (e.g., for geo-restriction bypass)
-- Latency is more important than strong privacy guarantees
+VPNs are appropriate when: you fully trust the VPN provider; your threat model is ISP surveillance only; you need consistent exit IP; latency is more important than strong privacy guarantees.
 
-BGP-X is appropriate when:
-
-- You need privacy that does not depend on trusting any single provider
-- Your threat model includes legal coercion of service providers
-- You are building infrastructure that must be resilient to targeted observation
-- You need network-layer privacy for all applications, not just browsers
+BGP-X is appropriate when: you need privacy not dependent on trusting any single provider; your threat model includes legal coercion; you need network-layer privacy for all applications; you want ISP-free operation for mesh communities.
 
 ---
 
@@ -117,73 +110,129 @@ BGP-X is appropriate when:
 
 ### Similarities
 
-Both BGP-X and I2P use garlic/onion routing and are fully decentralized. Both support native services (BGP-X native services, I2P eepsites). Both are designed to resist traffic analysis.
+Both BGP-X and I2P use multi-hop routing with anonymity properties. Both support native services (BGP-X native services, I2P eepsites). Both are fully decentralized.
 
 ### Differences
 
-**Clearnet access**: I2P is primarily designed as an internal network. Clearnet access via I2P outproxies is limited and not a primary use case. BGP-X is designed from the ground up for full clearnet access via gateways, with internal BGP-X native services as an additional capability.
+**Clearnet access**: I2P is primarily an internal network; clearnet outproxies are limited. BGP-X is designed for full clearnet access via signed gateways as a primary use case.
 
-**Transport**: I2P uses NTCP2 (TCP-based) and SSU2 (UDP-based) transports. BGP-X uses UDP natively with a custom reliability layer tuned for multi-hop overlay routing.
+**Transport**: I2P uses NTCP2 (TCP) and SSU2 (UDP). BGP-X uses UDP natively with custom reliability layer; mesh transports (LoRa, WiFi) for ISP-free operation.
 
-**Network integration**: I2P exposes a SOCKS proxy and HTTP proxy. BGP-X exposes a TUN interface for full network-layer integration.
+**Pool trust**: I2P has no equivalent to BGP-X's pool-based trust domains and double-exit architecture.
 
-**Path model**: I2P uses unidirectional tunnels (separate inbound and outbound paths). BGP-X uses bidirectional paths with separate return routing. The BGP-X model is simpler to reason about for general internet traffic.
+**ECH**: I2P has no exit-level ECH support.
 
-**Router firmware**: I2P requires a JVM and has significant resource requirements. BGP-X is implemented in Rust and designed for embedded/router deployment.
+**Hardware ecosystem**: I2P requires a JVM (high resource requirements). BGP-X is implemented in Rust and designed for embedded/router deployment.
+
+---
+
+## BGP-X vs. cjdns
+
+### What cjdns Does
+
+cjdns (Hyperboria) provides public key addressing for overlay networks. Like BGP-X, it uses cryptographic identities and works over existing internet infrastructure or local networks.
+
+### Key Differences
+
+**No onion routing**: cjdns uses point-to-point encrypted links between adjacent nodes. No multi-hop anonymity — any node on the path can see both source and destination.
+
+**No anonymity**: cjdns is designed for connectivity (a mesh internet), not privacy. The design does not attempt to hide communication patterns.
+
+**No clearnet exit model**: cjdns is a separate overlay network. It does not provide access to clearnet internet destinations via exit nodes.
+
+**No pools**: no trust tier mechanism.
+
+**No hardware ecosystem**: cjdns is software only.
+
+**BGP-X position**: BGP-X builds on cjdns's insight that public key addressing is a better model than IP addressing, and adds multi-hop onion routing, clearnet exit, pool trust domains, and hardware targets on top.
+
+---
+
+## BGP-X vs. Reticulum
+
+### What Reticulum Does
+
+Reticulum Network Stack provides cryptographic mesh networking designed for low-bandwidth links. It works across multiple transports (LoRa, WiFi, serial, etc.) and is designed for resilient communication.
+
+### Key Differences
+
+**No onion routing**: Reticulum uses point-to-point encrypted links. Each node on a path can observe message routing.
+
+**No anonymity**: communication source and destination visible to relaying nodes.
+
+**No clearnet exit model**: Reticulum is for peer-to-peer communication within the network; not designed for clearnet internet access via exit nodes.
+
+**No pools**: no trust tier mechanism.
+
+**BGP-X position**: BGP-X validates Reticulum's approach to multi-transport mesh (especially LoRa for long-range low-bandwidth use), and adds the missing onion routing, clearnet exit, pool trust domains, and hardware ecosystem.
 
 ---
 
 ## BGP-X vs. SCION
 
-### What SCION does
+### What SCION Does
 
-SCION (Scalability, Control, and Isolation On Next-generation networks) is a next-generation internet architecture that provides:
+SCION (Scalability, Control, and Isolation On Next-generation networks) provides path-aware networking at the infrastructure level, requiring ISP adoption. Strong PKI-based trust, path selection control, AS isolation.
 
-- Path-aware networking (senders can choose network paths)
-- Isolation between routing domains (ISDs)
-- Strong PKI-based trust
+### The Fundamental Difference
 
-SCION is a genuine architectural replacement for parts of BGP, designed to be deployed at the ISP and infrastructure level.
+**SCION requires ISP cooperation.** It is a next-generation internet architecture that ISPs must deploy. Currently limited to academic and research networks.
 
-### The fundamental difference
-
-**SCION requires ISP cooperation.** It is not an overlay. To use SCION, your ISP must run SCION infrastructure. Today, SCION is deployed in limited academic and research environments. It is not available to general internet users.
-
-**BGP-X requires no infrastructure changes.** It runs on top of the existing internet, using BGP as dumb transport. Any user with an internet connection can use BGP-X today (once the reference implementation exists). Any operator with a server can run a BGP-X node today.
+**BGP-X requires no infrastructure changes.** It runs on top of the existing internet as an overlay. Any user with an internet connection can use BGP-X today (once implementation is complete).
 
 ### Complementarity
 
-BGP-X and SCION are not competitors. If SCION becomes widely deployed, BGP-X can use SCION paths as its transport layer, gaining SCION's path-integrity properties at Layer 0 while retaining BGP-X's privacy properties at the overlay layer. This is a natural future integration point.
+BGP-X and SCION are not competitors. If SCION becomes widely deployed, BGP-X can use SCION paths as its transport layer (Level 0 in BGP-X's stack), gaining SCION's path-integrity properties while retaining BGP-X's privacy overlay properties above it.
 
 ---
 
 ## Property Deep Dives
 
-### Resistance to traffic correlation
+### Timing Correlation Resistance
 
-Traffic correlation is the most challenging attack against any low-latency anonymity network. An adversary who can observe traffic entering the overlay (at the entry node) and traffic exiting the overlay (at the exit node) can potentially correlate them based on timing and volume patterns.
+All low-latency anonymity networks share the fundamental challenge of timing correlation. BGP-X mitigations:
 
-**Tor**: Vulnerable to correlation by a global passive adversary. Tor's design accepts this as a fundamental limitation of low-latency networks. Research has demonstrated practical correlation attacks under certain conditions.
+- Variable path length (more hops = more timing disruption)
+- Geographic diversity (physical distance creates timing ambiguity)
+- Stream multiplexing (multiple streams share path; per-stream timing is ambiguous)
+- Cover traffic (COVER packets use session_key; externally identical to RELAY; disrupt timing fingerprints)
+- KEEPALIVE randomization (±5 seconds; prevents keepalive timing fingerprinting)
 
-**BGP-X**: Has the same fundamental vulnerability as Tor regarding timing correlation, because both are low-latency networks. BGP-X mitigates this through:
+Residual risk: a global passive adversary with simultaneous observation of entry and exit can attempt statistical correlation. This is acknowledged as an unsolved problem for all low-latency anonymous networks.
 
-- Variable path length (longer paths increase the correlation difficulty)
-- Geographic diversity requirements (reduces the probability that a single adversary observes both ends)
-- Pluggable cover traffic module (adds synthetic traffic to disrupt timing fingerprints)
-- Stream multiplexing (multiple streams on one path create ambiguity about which stream generates which packets)
+### Pool Trust Model
 
-Cover traffic is the most effective mitigation but comes at a bandwidth cost. It is off by default and can be enabled for high-risk sessions.
+BGP-X's pool system has no equivalent in any compared system. Key properties:
 
-### Forward secrecy
+- Trust is NOT transitive across pools — each node is individually verified regardless of pool membership
+- Pool curators sign membership records; curator keys are separate from node identity keys
+- Pool curator key rotation uses dual-signature records (old key + new key both sign); 24hr acceptance window
+- Emergency rotation (compromise_confirmed) uses 2hr window
+- Private pools enable fully controlled exit infrastructure with zero public membership disclosure
+- Cross-pool diversity enforcement prevents single operator from controlling entry + exit across segments
 
-Both BGP-X and Tor provide forward secrecy at the session level. Session keys are ephemeral — derived from a Diffie-Hellman exchange and destroyed after the session. Compromise of a node's long-term static key does not decrypt past sessions.
+### ECH / SNI Protection
 
-VPNs vary widely in forward secrecy implementation. Many commercial VPNs do not implement forward secrecy correctly.
+Standard TLS ClientHello includes the Server Name Indication (SNI) — the domain name in plaintext, visible to any network observer and to the exit node itself.
 
-### Exit node trust
+BGP-X exit nodes support ECH (Encrypted Client Hello) when the destination publishes ECH configuration in its DNS HTTPS record. The exit node queries for this configuration via DoH (with DNSSEC validation and ECS stripping). When ECH is available, the TLS ClientHello is constructed with the inner ClientHello (containing the real SNI) encrypted to the server's ECH public key.
 
-**Tor**: Any volunteer can run an exit node. There is no vetting, signing, or exit policy enforcement at the protocol level. Exit nodes are expected to publish an exit policy (what ports and destinations they will forward), but this is advisory.
+Result: exit node sees only the outer ClientHello with a generic SNI; real domain is encrypted. Network observers between exit and destination cannot see the domain name.
 
-**BGP-X**: Exit nodes must publish a signed exit policy before they appear in the DHT as exit-capable nodes. The exit policy specifies exactly what traffic the gateway will forward and what logging (if any) is performed. Clients can filter gateways by policy before path construction. Gateways that violate their published policy are detectable and reportable through the reputation system.
+This is available in no other compared system at the exit node level.
 
-This does not eliminate the need to trust gateway operators — but it makes their commitments explicit, verifiable, and machine-readable.
+### Exit Node Trust
+
+**Tor**: Any volunteer can run an exit node. No vetting, no signed exit policy at the protocol level.
+
+**BGP-X**: Exit nodes publish signed exit policies specifying what traffic they will forward, logging policy (none/metadata/full), operator contact, and jurisdiction. Exit policies include DNS resolver configuration (DoH required), DNSSEC validation, ECS stripping, and ECH capability. Clients filter gateways by policy before path construction. Policy violations are reportable and affect reputation.
+
+**VPNs**: Operator publishes policy; no cryptographic enforcement at the protocol level.
+
+### Mesh and ISP-Free Operation
+
+Neither Tor, VPN, I2P, SCION, nor any other compared system provides ISP-free operation via mesh transport.
+
+BGP-X mesh modes enable communities to operate fully without ISP connectivity for intra-mesh traffic. Coverage gaps between separated mesh islands are bridged via internet relay pools (transparent to users, privately via BGP-X onion encryption). The pool-based DHT creates a unified global discovery layer spanning both mesh and internet nodes.
+
+This is the unique capability that enables BGP-X to serve communities without infrastructure — rural communities, disaster recovery scenarios, regions with censored internet, activist networks.
