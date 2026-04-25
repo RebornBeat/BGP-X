@@ -95,3 +95,81 @@ BGP-X exits to the public internet through designated gateway nodes that are exp
 ---
 
 ## Architecture in One Diagram
+
+[Application]
+      ↓
+[BGP-X Client SDK]
+      ↓
+[BGP-X Overlay Network]
+  Entry → Relay → Relay → Exit
+      ↓
+[Gateway: BGP-X → Public IP Internet]
+      ↓
+[Destination Server]
+
+
+
+The public internet's BGP routing is used only as a packet transport. All routing logic, identity, and privacy is handled within the BGP-X overlay.
+
+---
+
+## Repository Structure
+
+/bgp-x
+├── README.md               — This file
+├── ARCHITECTURE.md         — Full system architecture
+├── CHANGELOG.md            — Version history
+├── CONTRIBUTING.md         — Contribution guidelines
+├── CODE_OF_CONDUCT.md      — Community standards
+├── LICENSE                 — Apache 2.0
+├── SECURITY.md             — Vulnerability reporting
+├── /docs                   — User-facing documentation
+├── /protocol               — Protocol specification
+├── /control-plane          — Routing logic and node management
+├── /data-plane             — Packet forwarding and encryption
+├── /node                   — Node daemon specification
+├── /gateway                — BGP interoperability layer
+├── /firmware               — Router firmware targets
+├── /client                 — Client application specification
+├── /sdk                    — Developer SDK specification
+├── /security               — Security model and auditing
+├── /simulation             — Network and attack simulation
+├── /deployment             — Deployment and operations guides
+├── /production             — SOPs, certification, release
+└── /legal                  — Liability and privacy documentation
+
+
+---
+
+## Status
+
+BGP-X is in **pre-implementation specification phase**.
+
+All documentation in this repository represents a complete system design intended to guide implementation. No production code has been written yet.
+
+Phase plan:
+
+- [x] System architecture
+- [x] Protocol specification
+- [x] Security model
+- [ ] Reference implementation (Rust)
+- [ ] Testnet
+- [ ] Mainnet
+
+---
+
+## License
+
+Apache License 2.0. See [LICENSE](./LICENSE).
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](./SECURITY.md).
