@@ -93,3 +93,154 @@ This allows mesh communities to connect to each other and to the internet throug
 ---
 
 ## Architecture in One Diagram
+
+```
+[LAN Devices] ──► [BGP-X Router Daemon]
+                     │
+          ┌──────────┼──────────┐
+          │   Routing Policy Engine   │
+          └──────────┼──────────┘
+                     │
+          ┌──────────┼──────────┐
+          │   Overlay Routing Layer   │ (onion + pools)
+          └──────────┼──────────┘
+                     │
+   Mesh Transport ───┼─── Internet Transport (BGP-routed)
+          │          │          │
+     [Mesh Island]  [Gateway]  [Clearnet]
+```
+
+---
+
+## Repository Structure
+
+```
+/bgp-x
+├── README.md
+├── ARCHITECTURE.md
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+├── LICENSE
+├── SECURITY.md
+├── /docs
+│   ├── getting_started.md
+│   ├── architecture_overview.md
+│   ├── deployment_architecture.md
+│   ├── routing_policy.md
+│   ├── bgp_bgpx_coexistence.md
+│   ├── application_guide.md
+│   ├── mesh_architecture.md
+│   ├── ecosystem_unification.md
+│   ├── regulatory_framework.md
+│   └── faq.md
+├── /protocol
+│   ├── protocol_spec.md
+│   ├── packet_format.md
+│   ├── handshake.md
+│   ├── path_construction.md
+│   ├── pool_spec.md
+│   ├── pluggable_transport.md
+│   ├── path_quality_reporting.md
+│   ├── mesh_transport.md
+│   ├── pool_curator_key_rotation.md
+│   ├── error_handling.md
+│   └── versioning.md
+├── /control-plane
+│   ├── discovery.md
+│   ├── node_advertisement.md
+│   ├── routing_algorithm.md
+│   ├── geo_plausibility.md
+│   ├── reputation_system.md
+│   └── control_api.md
+├── /data-plane
+│   ├── forwarding.md
+│   ├── encryption_layers.md
+│   ├── congestion_control.md
+│   └── multiplexing.md
+├── /node
+│   ├── node.md
+│   └── api.md
+├── /gateway
+│   ├── gateway_spec.md
+│   ├── exit_node.md
+│   ├── entry_node.md
+│   └── bgp_interop.md
+├── /firmware
+│   └── firmware.md
+├── /client
+│   └── control_client.md
+├── /sdk
+│   └── sdk_spec.md
+├── /security
+│   ├── threat_model.md
+│   ├── attack_vectors.md
+│   ├── crypto_spec.md
+│   └── audit_plan.md
+├── /simulation
+│   ├── network_sim.md
+│   ├── attack_sim.md
+│   └── performance.md
+├── /deployment
+│   ├── bootstrap_nodes.md
+│   ├── node_setup.md
+│   ├── scaling.md
+│   ├── mesh_deployment.md
+│   ├── mast_tower_deployment.md
+│   ├── solar_deployment.md
+│   ├── aerial_deployment.md
+│   ├── vehicle_deployment.md
+│   ├── maritime_deployment.md
+│   ├── underground_deployment.md
+│   └── satellite_gateway_deployment.md
+├── /production
+│   ├── sop.md
+│   ├── node_certification.md
+│   └── release_process.md
+├── /legal
+│   ├── liability.md
+│   └── privacy_policy.md
+└── /hardware
+    ├── README.md
+    ├── node_spec.md
+    ├── gateway_spec.md
+    ├── amplifier_spec.md
+    ├── compatible_hardware.md
+    ├── meshtastic_adapter.md
+    └── manufacturing.md
+```
+
+---
+
+## Status
+
+BGP-X is in the **pre-implementation specification phase**.
+
+All documentation in this repository represents a complete system design intended to guide implementation. No production code has been written yet.
+
+Phase plan:
+
+- [x] System architecture (including router-centric model, pools, mesh, ECH)
+- [x] Protocol specification (including path_id, pool support, mesh transport, ECH)
+- [x] Security model (including pool threats, mesh threats)
+- [ ] Reference implementation (Rust)
+- [ ] Testnet
+- [ ] Mainnet
+
+---
+
+## License
+
+Apache License 2.0. See [LICENSE](./LICENSE).
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](./SECURITY.md).
