@@ -36,6 +36,7 @@ Every privacy property of BGP-X must be cryptographically enforceable, not depen
 ## 2. System Layers
 
 BGP-X defines five logical layers. Each is independent and composable.
+
 ┌─────────────────────────────────────────────────────────┐
 │                    Application Layer                    │
 │     Any IP application, service, or SDK consumer       │
@@ -52,6 +53,7 @@ BGP-X defines five logical layers. Each is independent and composable.
 │                   Transport Layer                       │
 │     UDP/IP, encrypted tunnels, existing BGP routing    │
 └─────────────────────────────────────────────────────────┘
+
 ---
 
 ## 3. Core Components
