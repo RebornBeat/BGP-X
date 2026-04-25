@@ -2,7 +2,7 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the complete wire encoding of all BGP-X packet types, with a focus on the onion packet structure that forms the core of the data plane.
+This document specifies the complete wire encoding of all BGP-X packet types, with focus on the onion packet structure that is core to the data plane.
 
 ---
 
@@ -10,7 +10,7 @@ This document specifies the complete wire encoding of all BGP-X packet types, wi
 
 - All multi-byte integers are big-endian (network byte order)
 - All byte sequences are unsigned unless stated otherwise
-- Variable-length fields are preceded by a length prefix unless the length is determined by the packet's Payload Length field
+- Variable-length fields are preceded by a length prefix unless length is determined by Payload Length field
 - All lengths are in bytes unless stated otherwise
 - Diagrams show bits from most-significant (left) to least-significant (right)
 
@@ -18,21 +18,21 @@ This document specifies the complete wire encoding of all BGP-X packet types, wi
 
 ## 2. Transport Framing
 
-BGP-X packets are UDP datagrams. The UDP payload contains exactly one BGP-X message per datagram.
+BGP-X packets are transport datagrams. For UDP/IP transport, each UDP datagram contains exactly one BGP-X message. For mesh transports with small MTU, MESH_FRAGMENT (0x19) handles fragmentation at the transport layer.
 
 ```
-[UDP Datagram]
-  [IP Header]
-  [UDP Header]
-  [BGP-X Common Header]
+[UDP Datagram]                  [LoRa Frame]
+  [IP Header]                    [LoRa Header]
+  [UDP Header]                   [MESH_FRAGMENT Header]
+  [BGP-X Common Header]          [Fragment Payload]
   [BGP-X Message Payload]
 ```
 
-There is no BGP-X framing layer above UDP. Each UDP datagram is one self-contained BGP-X message.
+There is no BGP-X framing layer above the transport. Each transport datagram is one self-contained BGP-X message (or one fragment of a message, for low-MTU transports).
 
 ---
 
-## 3. Common Header (Revisited, Full Bit Layout)
+## 3. Common Header (Full Bit Layout)
 
 ```
 Byte offset:
@@ -40,16 +40,14 @@ Byte offset:
   ┌────────┬────────┬────────────────┐
   │Version │MsgType │   Reserved     │
   └────────┴────────┴────────────────┘
-  4        5        6        7
+  4        5        ...             19
   ┌─────────────────────────────────┐
   │          Session ID             │
   │           (16 bytes)            │
-  │                                 │
-  │                                 │
   └─────────────────────────────────┘
-  20       21       22       23
+  20       21       ...            27
   ┌─────────────────────────────────┐
-  │        Sequence Number          │
+  │     Outbound Sequence Number    │
   │           (8 bytes)             │
   └─────────────────────────────────┘
   28       29       30       31
@@ -65,277 +63,403 @@ Byte offset:
 ```
 
 Total header size: **32 bytes**
+
 Maximum total packet size: **1280 bytes** (path MTU target)
+
 Maximum payload size: **1248 bytes** (1280 - 32 header)
 
 ---
 
 ## 4. Onion Packet Structure
 
-The onion packet is the central data structure of BGP-X. It is the payload of a RELAY message.
-
 ### 4.1 Overview
 
-For a path of N hops, the client constructs N nested encryption layers. The outermost layer is addressed to the entry node (hop 1). Each hop decrypts its layer and reveals the next hop address and the remaining ciphertext for subsequent hops.
+For a path of N hops, the client constructs N nested encryption layers. The outermost layer is addressed to the entry node. Each hop decrypts its layer to reveal the path_id, next-hop address, and remaining ciphertext for subsequent hops.
 
 ```
-Client constructs:
-┌─────────────────────────────────────────────────┐
-│  Encrypted for Entry Node (hop 1)               │
-│  ┌───────────────────────────────────────────┐  │
-│  │  Encrypted for Relay 1 (hop 2)            │  │
-│  │  ┌─────────────────────────────────────┐  │  │
-│  │  │  Encrypted for Relay 2 (hop 3)      │  │  │
-│  │  │  ┌───────────────────────────────┐  │  │  │
-│  │  │  │  Encrypted for Exit (hop 4)   │  │  │  │
-│  │  │  │  [Destination + Payload]      │  │  │  │
-│  │  │  └───────────────────────────────┘  │  │  │
-│  │  └─────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+Client constructs for 4-hop path:
+┌─────────────────────────────────────────────────────────────────┐
+│  Encrypted for Entry (hop 1)                                     │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Encrypted for Relay 1 (hop 2)                            │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │  Encrypted for Relay 2 (hop 3)                      │  │  │
+│  │  │  ┌───────────────────────────────────────────────┐  │  │  │
+│  │  │  │  Encrypted for Exit (hop 4)                   │  │  │  │
+│  │  │  │  [hop_type][next_hop][path_id][stream_id]     │  │  │  │
+│  │  │  │  [flags][reserved][payload]                   │  │  │  │
+│  │  │  └───────────────────────────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 Single Onion Layer Format
-
-Each decrypted onion layer has the following structure:
+### 4.2 Single Onion Layer Format (After Decryption)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Layer Header                             │
-├──────────────────┬──────────────────────────────────────────┤
-│  Hop Type        │  1 byte                                  │
-│  Next Hop        │  40 bytes (NodeID 32B + addr 4B + port 2B + pad 2B) │
-│  Stream ID       │  4 bytes                                 │
-│  Flags           │  2 bytes                                 │
-│  Reserved        │  2 bytes                                 │
-├─────────────────────────────────────────────────────────────┤
-│                    Remaining Ciphertext                     │
-│              (payload for next and subsequent hops)         │
-│                      (variable)                             │
-└─────────────────────────────────────────────────────────────┘
+Byte  0:      hop_type     (1 byte)
+Bytes 1-40:   next_hop     (40 bytes)
+Bytes 41-48:  path_id      (8 bytes) ← NEW: return routing identifier
+Bytes 49-52:  stream_id    (4 bytes)
+Bytes 53-54:  flags        (2 bytes)
+Bytes 55-56:  reserved     (2 bytes, MUST be 0x0000)
+Bytes 57+:    remaining_ciphertext (variable, for subsequent hops)
 ```
 
-#### Hop Type Values
+**Total layer header: 57 bytes** (was 49 in prior versions)
+
+### 4.3 path_id Field (Bytes 41-48)
+
+The path_id is 8 bytes of cryptographically random data generated by the client per path instance.
+
+Properties:
+- Generated using CSPRNG
+- Unique per path instance (regenerated on each path build)
+- Identical value in every onion layer of the same path
+- Never reused within a session
+- Not linked to any client identifier
+- Never logged by any BGP-X component
+
+Use: relay nodes store `path_id → source_addr` for return traffic routing. Intermediate relays use path_id lookup to forward return traffic blobs without decrypting them.
+
+A path_id of all zeros (0x0000000000000000) is INVALID and MUST be rejected (silently dropped, log internally).
+
+### 4.4 Hop Type Values
 
 | Value | Meaning |
 |---|---|
 | 0x01 | Relay — forward to another BGP-X node |
 | 0x02 | Exit — forward to clearnet destination (IPv4) |
 | 0x03 | Exit — forward to clearnet destination (IPv6) |
-| 0x04 | Exit — forward to domain name |
-| 0x05 | Delivery — this is the final hop (BGP-X native service) |
+| 0x04 | Exit — forward to domain name (resolve at exit) |
+| 0x05 | Delivery — BGP-X native service (this is the final destination) |
 
-#### Next Hop Field Encoding
+### 4.5 Next Hop Field Encoding
 
-The Next Hop field is always 40 bytes:
+The Next Hop field is always **40 bytes**.
 
-For Hop Type 0x01 (Relay to another BGP-X node):
-
+For Hop Type 0x01 (Relay to BGP-X node):
 | Bytes | Content |
 |---|---|
-| 0–31 | NodeID of next BGP-X relay node |
-| 32–35 | IPv4 address of next node |
-| 36–37 | UDP port of next node |
-| 38–39 | Reserved (0x0000) |
+| 0-31 | NodeID of next relay (BLAKE3 hash, 32 bytes) |
+| 32-35 | IPv4 address |
+| 36-37 | UDP port |
+| 38-39 | Reserved (0x0000) |
 
 For Hop Type 0x02 (Exit to IPv4):
-
 | Bytes | Content |
 |---|---|
-| 0–3 | Destination IPv4 address |
-| 4–5 | Destination TCP/UDP port |
-| 6–39 | Zero-padded |
+| 0-3 | Destination IPv4 |
+| 4-5 | Destination port |
+| 6-39 | Zero-padded |
 
 For Hop Type 0x03 (Exit to IPv6):
-
 | Bytes | Content |
 |---|---|
-| 0–15 | Destination IPv6 address |
-| 16–17 | Destination TCP/UDP port |
-| 18–39 | Zero-padded |
+| 0-15 | Destination IPv6 |
+| 16-17 | Destination port |
+| 18-39 | Zero-padded |
 
-For Hop Type 0x04 (Exit to domain name):
-
+For Hop Type 0x04 (Exit to domain):
 | Bytes | Content |
 |---|---|
-| 0 | Domain name length (1–38 bytes) |
-| 1–N | Domain name (ASCII, no null terminator) |
-| N+1–37 | Zero-padded |
-| 38–39 | Destination TCP/UDP port |
+| 0 | Domain name length (1-38) |
+| 1-N | Domain name (ASCII) |
+| N+1-37 | Zero-padded |
+| 38-39 | Destination port |
 
-For Hop Type 0x05 (BGP-X native service delivery):
-
+For Hop Type 0x05 (BGP-X native service):
 | Bytes | Content |
 |---|---|
-| 0–31 | ServiceID (Ed25519 public key of destination service) |
-| 32–39 | Zero-padded |
+| 0-31 | ServiceID (Ed25519 public key) |
+| 32-39 | Zero-padded |
 
-### 4.3 Encryption of Each Layer
-
-Each layer is encrypted with ChaCha20-Poly1305 using:
-
-- **Key**: Session key derived during handshake for this specific hop
-- **Nonce**: 12 bytes, constructed as: [4 bytes zero-pad] [8 bytes packet sequence number]
-- **AAD (Additional Authenticated Data)**: The 32-byte BGP-X common header (excluding payload)
-- **Plaintext**: Layer Header + Remaining Ciphertext
-- **Ciphertext**: Encrypted plaintext + 16-byte Poly1305 authentication tag
+### 4.6 path_id Generation
 
 ```
-Ciphertext = ChaCha20-Poly1305-Encrypt(
-    key = session_key[hop_i],
-    nonce = [0x00000000] || sequence_number,
-    aad = bgpx_common_header,
-    plaintext = layer_header || remaining_ciphertext
-)
+path_id = CSPRNG.generate_bytes(8)
+
+Constraints:
+  - MUST be 8 bytes
+  - MUST be cryptographically random
+  - MUST NOT be all zeros
+  - MUST be regenerated for each new path
+  - MUST NOT be reused within a session
+  - MUST be included identically in all layers of the same path
 ```
 
-The authentication tag is appended to the ciphertext. Decryption MUST verify the authentication tag before any processing of the plaintext.
+### 4.7 Encryption of Each Layer
 
-### 4.4 Onion Construction Algorithm
+Each layer is encrypted with ChaCha20-Poly1305:
 
 ```
-function construct_onion(payload, path, session_keys):
-    # path = [entry, relay_1, ..., relay_n, exit]
-    # session_keys = [key_entry, key_relay_1, ..., key_exit]
+Key:    session_key[hop_i]                    (32 bytes)
+Nonce:  [0x00000000] || sequence_number_BE8   (12 bytes)
+AAD:    BGP-X common header (32 bytes)
+PT:     Layer Header (57 bytes) || Remaining Ciphertext
+CT:     Encrypted plaintext || 16-byte Poly1305 tag
+```
 
-    # Start with the innermost layer (exit hop)
+The authentication tag is appended to the ciphertext. Decryption MUST verify the tag before any plaintext processing.
+
+### 4.8 Onion Construction Algorithm
+
+```
+function construct_onion(payload, path, session_keys, path_id, sequence):
+
+    # Start with innermost layer (exit hop)
     current = construct_layer(
         hop_type = exit_type(path[-1]),
         next_hop = destination,
-        payload = payload,
-        key = session_keys[-1],
-        sequence = sequence_number
+        path_id  = path_id,          # same path_id in all layers
+        stream_id = stream_id,
+        payload  = payload,
+        key      = session_keys[-1],
+        aad      = construct_header(sequence),
+        sequence = sequence
     )
 
-    # Wrap each subsequent layer from exit toward entry
+    # Wrap each layer from exit-1 toward entry
     for i in range(len(path) - 2, -1, -1):
         current = construct_layer(
-            hop_type = 0x01,  # relay
-            next_hop = path[i + 1],
-            payload = current,
-            key = session_keys[i],
-            sequence = sequence_number
+            hop_type  = 0x01,          # relay
+            next_hop  = path[i + 1],
+            path_id   = path_id,       # same path_id
+            stream_id = stream_id,
+            payload   = current,
+            key       = session_keys[i],
+            aad       = construct_header(sequence),
+            sequence  = sequence
         )
 
-    return current
+    return current  # Outermost layer, sent to entry
 ```
 
-### 4.5 Onion Unwrapping Algorithm (at each relay)
+### 4.9 Onion Unwrapping Algorithm (at each relay)
 
 ```
 function unwrap_onion(packet, session_key, sequence_number):
-    # Attempt decryption
+
+    # Replay check on inbound sequence space
+    if not check_inbound_sequence(sequence_number):
+        return DROP("Replay detected")
+
+    # Decrypt
     plaintext = ChaCha20-Poly1305-Decrypt(
-        key = session_key,
-        nonce = [0x00000000] || sequence_number,
-        aad = packet.common_header,
+        key      = session_key,
+        nonce    = 0x00000000 || sequence_number_BE8,
+        aad      = packet.common_header,
         ciphertext = packet.payload
     )
 
-    # If decryption fails (auth tag mismatch), drop silently
     if plaintext is None:
-        return DROP
+        return DROP("Auth failure")
 
     # Parse layer header
-    hop_type = plaintext[0]
-    next_hop = plaintext[1:41]
-    remaining = plaintext[49:]  # skip header fields
+    hop_type   = plaintext[0]
+    next_hop   = plaintext[1:41]
+    path_id    = plaintext[41:49]
+    stream_id  = plaintext[49:53]
+    flags      = plaintext[53:55]
+    reserved   = plaintext[55:57]
+    remaining  = plaintext[57:]
 
-    return (hop_type, next_hop, remaining)
+    # Validate path_id
+    if path_id == bytes(8):  # All zeros
+        return DROP("Invalid path_id")
+
+    # Store path_id → source for return routing
+    path_table[path_id] = (packet.source_addr, current_time())
+
+    return (hop_type, next_hop, path_id, stream_id, remaining)
 ```
 
 ---
 
-## 5. Handshake Packet Formats
+## 5. HANDSHAKE_INIT Wire Format (Two-Part Structure)
 
-See `/protocol/handshake.md` for handshake message formats. Below is a summary of the wire format for each handshake message.
-
-### HANDSHAKE_INIT Payload
+HANDSHAKE_INIT MUST use the following wire format:
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│              Client Ephemeral Public Key (32 bytes)           │
-│                     (X25519 key)                              │
-├───────────────────────────────────────────────────────────────┤
-│              Encrypted Init Payload (variable)                │
-│  Contains: timestamp, supported versions, extension flags     │
-│  Encrypted with: ChaCha20-Poly1305, key = HKDF(             │
-│      IKM = X25519(client_ephemeral_priv, node_static_pub),   │
-│      info = "bgpx-handshake-init"                            │
-│  )                                                            │
-└───────────────────────────────────────────────────────────────┘
+BGP-X Common Header (32 bytes, Msg Type = 0x02)
+
+CLEARTEXT PORTION:
+  Bytes 32-63:   Client Ephemeral Public Key (X25519, 32 bytes)
+                 This MUST be cleartext — the node needs it to compute dh1
+                 This is NOT a security problem (public key is not secret)
+
+ENCRYPTED PORTION (by init_key derived from dh1):
+  Bytes 64-239:  Encrypted Payload (176 bytes, ChaCha20-Poly1305)
+  Bytes 240-255: Poly1305 Authentication Tag (16 bytes)
+
+Total HANDSHAKE_INIT size: 256 bytes (MUST be exactly 256 bytes, padded)
 ```
 
-### HANDSHAKE_RESP Payload
-
+**AAD for HANDSHAKE_INIT encryption**:
 ```
-┌───────────────────────────────────────────────────────────────┐
-│              Node Ephemeral Public Key (32 bytes)             │
-│                     (X25519 key)                              │
-├───────────────────────────────────────────────────────────────┤
-│              Encrypted Resp Payload (variable)                │
-│  Contains: session ID, selected version, extension flags      │
-│  Encrypted with: ChaCha20-Poly1305, key = HKDF(             │
-│      IKM = X25519(node_ephemeral_priv, client_ephemeral_pub) │
-│           XOR                                                 │
-│           X25519(node_static_priv, client_ephemeral_pub),    │
-│      info = "bgpx-handshake-resp"                            │
-│  )                                                            │
-└───────────────────────────────────────────────────────────────┘
+AAD = BGP-X Common Header (32 bytes)
+    || Client Ephemeral Public Key (32 bytes)
+    = 64 bytes total
 ```
 
-### HANDSHAKE_DONE Payload
+Both cleartext portions are authenticated even though the first is not encrypted.
 
+**Encrypted payload content** (176 bytes before padding):
 ```
-┌───────────────────────────────────────────────────────────────┐
-│              Encrypted Done Payload (variable)                │
-│  Contains: confirmation hash, initial path segment            │
-│  Encrypted with: ChaCha20-Poly1305, session key              │
-└───────────────────────────────────────────────────────────────┘
+  Session ID          (16 bytes)
+  Timestamp           (8 bytes, Unix epoch)
+  Protocol Version    (2 bytes)
+  Extension Flags     (4 bytes)
+  Padding             (variable, to reach 192 bytes plaintext for 176 byte ct + 16 tag)
 ```
 
 ---
 
-## 6. Node Advertisement Wire Format
-
-Node advertisements stored in the DHT are JSON documents encoded as UTF-8 and prepended with a 4-byte big-endian length prefix when transmitted.
+## 6. HANDSHAKE_RESP Wire Format
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│              Record Length (4 bytes, big-endian)              │
-├───────────────────────────────────────────────────────────────┤
-│              Canonical JSON (variable)                        │
-│        (UTF-8, compact, keys sorted alphabetically)           │
-└───────────────────────────────────────────────────────────────┘
+BGP-X Common Header (32 bytes, Msg Type = 0x03)
+
+CLEARTEXT PORTION:
+  Bytes 32-63:   Node Ephemeral Public Key (X25519, 32 bytes)
+
+ENCRYPTED PORTION (by resp_key):
+  Bytes 64-239:  Encrypted Payload (176 bytes)
+  Bytes 240-255: Poly1305 Authentication Tag
+
+Total HANDSHAKE_RESP size: 256 bytes (MUST be exactly 256 bytes)
 ```
 
-Maximum advertisement size: **4096 bytes** (including length prefix).
-
----
-
-## 7. DHT Key Derivation
-
-DHT storage keys for node advertisements are derived as:
-
+Encrypted payload content:
 ```
-dht_key = BLAKE3("bgpx-node-advert" || node_id)
-```
-
-This namespacing prevents collisions between different types of DHT records.
-
-For future record types, a different prefix is used:
-
-```
-dht_key = BLAKE3("bgpx-<record-type>" || record_identifier)
+  Session ID Echo     (16 bytes, MUST match HANDSHAKE_INIT session_id)
+  Timestamp           (8 bytes)
+  Selected Version    (2 bytes)
+  Accepted Extensions (4 bytes)
+  Confirmation Hash   (32 bytes)
+    BLAKE3("bgpx-resp-confirm" || session_key || session_id)
+  Padding
 ```
 
 ---
 
-## 8. Padding and Size Normalization
+## 7. HANDSHAKE_DONE Wire Format
 
-BGP-X implementations SHOULD normalize packet sizes to resist traffic analysis. All RELAY packets SHOULD be padded to a fixed size or one of a small set of allowed sizes before encryption.
+```
+BGP-X Common Header (32 bytes, Msg Type = 0x04)
 
-Recommended size classes (total UDP payload including BGP-X header):
+ENCRYPTED PORTION (by session_key):
+  Bytes 32-111:  Encrypted Payload (80 bytes)
+  Bytes 112-127: Poly1305 Authentication Tag
+
+Total HANDSHAKE_DONE size: 128 bytes (MUST be exactly 128 bytes)
+```
+
+Encrypted payload content:
+```
+  Confirmation Hash   (32 bytes)
+    BLAKE3("bgpx-done-confirm" || session_key || session_id)
+  path_id             (8 bytes) — informs node of its path context
+  Padding
+```
+
+---
+
+## 8. PATH_QUALITY_REPORT Wire Format
+
+```
+BGP-X Common Header (32 bytes, Msg Type = 0x16)
+
+ENCRYPTED PAYLOAD (encrypted for client using client's session key for this hop):
+  Bytes 32-47:  Encrypted Report (16 bytes)
+  Bytes 48-63:  Poly1305 Authentication Tag
+
+Total: 64 bytes (fixed size always)
+```
+
+Decrypted content (16 bytes):
+```
+  Byte 0:      hop_latency_bucket
+               0x00 = <50ms
+               0x01 = 50-150ms
+               0x02 = 150-300ms
+               0x03 = >300ms
+  Byte 1:      congestion_flag
+               0x00 = none
+               0x01 = mild
+               0x02 = severe
+  Bytes 2-15:  padding (random, for size normalization)
+```
+
+---
+
+## 9. NODE_WITHDRAW Wire Format
+
+```
+BGP-X Common Header (32 bytes, Msg Type = 0x15, Session ID = 0x00...00)
+  Bytes 32-63:  NodeID (32 bytes, BLAKE3 hash)
+  Bytes 64-71:  Withdraw Timestamp (8 bytes, uint64 Unix epoch seconds)
+  Bytes 72-135: Ed25519 Signature (64 bytes)
+                Signs: BLAKE3("bgpx-withdrawal-v1" || node_id || timestamp_BE8)
+
+Total payload: 104 bytes
+```
+
+---
+
+## 10. MESH_BEACON Wire Format
+
+```
+BGP-X Common Header (32 bytes, Msg Type = 0x18, Session ID = 0x00...00)
+  Bytes 32-63:  NodeID (32 bytes)
+  Bytes 64-95:  Ed25519 Public Key (32 bytes)
+  Byte  96:     Transports Supported (1 byte bitmask)
+                Bit 0: UDP/IP  Bit 1: WiFi mesh  Bit 2: LoRa
+                Bit 3: BLE     Bit 4: Ethernet P2P
+  Bytes 97-98:  DHT Routing Table Size (2 bytes, uint16)
+  Bytes 99-106: Timestamp (8 bytes, uint64 Unix epoch)
+  Bytes 107-170: Ed25519 Signature (64 bytes)
+
+Total payload: 139 bytes
+```
+
+---
+
+## 11. MESH_FRAGMENT Wire Format
+
+```
+BGP-X Common Header (32 bytes, Msg Type = 0x19, Session ID = 0x00...00)
+  Bytes 32-35:  Original Packet ID (4 bytes, random per original packet)
+  Byte  36:     Fragment Number (0-indexed, 0 = first fragment)
+  Byte  37:     Total Fragments (1-16)
+  Bytes 38+:    Fragment Payload (variable)
+
+Total fragment overhead: 6 bytes (beyond common header)
+```
+
+Maximum fragment payload depends on transport MTU minus header overhead:
+- LoRa SF7: ~200 - 38 = ~162 bytes usable per fragment
+- 16 fragments × 162 bytes = ~2592 bytes maximum reassembled packet
+
+---
+
+## 12. Pool Advertisement Wire Format
+
+```
+Length Prefix (4 bytes, big-endian)
+Pool Advertisement JSON (UTF-8, compact, keys sorted, max 4096 bytes)
+```
+
+DHT storage key for pool advertisements:
+```
+pool_key = BLAKE3("bgpx-pool-v1" || pool_id_bytes)
+```
+
+---
+
+## 13. Padding and Size Normalization
+
+All RELAY and COVER packets SHOULD be padded to the nearest size class before encryption:
 
 | Size Class | Total UDP Payload |
 |---|---|
@@ -344,11 +468,45 @@ Recommended size classes (total UDP payload including BGP-X header):
 | Large | 1024 bytes |
 | Maximum | 1280 bytes |
 
-Padding MUST be added inside the innermost encryption layer (before onion wrapping) so that it is encrypted and indistinguishable from payload data to any relay node.
+COVER packets MUST use the same size class distribution as RELAY packets on the same session to prevent cover/data distinguishing via size.
+
+Padding is added inside the innermost encryption layer (before onion wrapping) and is encrypted — indistinguishable from payload to any relay node.
+
+Padding structure (appended to plaintext before encryption):
+```
+[original_content][random_padding_bytes][padding_length: uint16]
+```
+
+The `padding_length` field (last 2 bytes of padded block) enables the receiver to strip padding.
 
 ---
 
-## 9. Endianness and Encoding Reference
+## 14. ECH Stream Flags
+
+STREAM_OPEN messages include ECH preference flags:
+
+```
+Stream Flags field (2 bytes):
+  Bit 0: ECH_REQUIRED
+    If set: exit MUST use ECH; fail stream if ECH not available
+    If clear: ECH preferred but not required
+  Bit 1: ECH_PREFERRED
+    If set: use ECH when destination publishes ECH config
+    If clear: skip ECH even if available
+  Bits 2-15: Reserved
+```
+
+ECH negotiation result is returned in the stream's DATA header flags when the first data arrives from the exit:
+
+```
+DATA flags (first response packet from exit):
+  Bit 11: ECH_NEGOTIATED (1 = ECH was used, 0 = standard TLS)
+  Bit 12: ECH_AVAILABLE (1 = destination supports ECH, 0 = not available)
+```
+
+---
+
+## 15. Endianness and Encoding Reference
 
 | Type | Encoding |
 |---|---|
@@ -360,12 +518,11 @@ Padding MUST be added inside the innermost encryption layer (before onion wrappi
 | NodeID | 32 bytes, BLAKE3 output |
 | PublicKey | 32 bytes, Ed25519 or X25519 public key |
 | Signature | 64 bytes, Ed25519 signature |
+| path_id | 8 bytes, CSPRNG output |
 | Timestamp | ISO 8601 string in JSON; uint64 Unix epoch seconds on wire |
 
 ---
 
-## 10. Test Vectors
+## 16. Test Vectors
 
-Test vectors for onion encryption, handshake messages, and node advertisement signing will be published in `/security/audit_plan.md` and as machine-readable JSON in `/protocol/test_vectors/` once the reference implementation is underway.
-
-All implementations MUST pass the published test vectors before being considered compliant.
+Test vectors for onion encryption, handshake messages, node advertisement signing, and all new fields (path_id, mesh endpoints, ECH flags) will be published in `/protocol/test_vectors/` during reference implementation. All implementations MUST pass published test vectors before being considered compliant.
