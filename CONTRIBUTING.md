@@ -13,6 +13,8 @@ Read the following documents before submitting any contribution:
 1. [ARCHITECTURE.md](./ARCHITECTURE.md) — understand the full system design
 2. [/protocol/protocol_spec.md](./protocol/protocol_spec.md) — understand the protocol
 3. [/security/threat_model.md](./security/threat_model.md) — understand the adversary model
+4. [/protocol/pool_spec.md](./protocol/pool_spec.md) — understand the pool trust model
+5. [/docs/bgp_bgpx_coexistence.md](./docs/bgp_bgpx_coexistence.md) — understand BGP/BGP-X relationship
 
 If you propose a change that violates a design principle or weakens a security property, it will be rejected regardless of implementation quality.
 
@@ -42,13 +44,34 @@ Specification changes require:
 - Performance improvements (must include benchmark)
 - New features (must have an open accepted specification issue first)
 
+### Routing Policy Contributions
+
+Routing policy rule syntax and evaluation algorithm changes require:
+- Proof that the change does not create bypass vectors
+- Test scenarios demonstrating correct behavior
+
+### Hardware Contributions
+
+New hardware target contributions require:
+- Testing on physical hardware
+- Performance benchmarks matching or exceeding tier requirements
+- OpenWrt or BGP-X firmware build integration
+- Documentation in `/hardware/compatible_hardware.md`
+
+### Mesh Transport Contributions
+
+New transport adapters must:
+- Implement the `MeshTransport` trait as specified in `/protocol/mesh_transport.md`
+- Pass all transport-specific test vectors
+- Document MTU limits, bandwidth class, latency class, and regulatory considerations
+
 ---
 
 ## Contribution Process
 
 1. Fork the repository
 2. Create a branch: `git checkout -b type/short-description`
-   - Types: `docs/`, `spec/`, `fix/`, `feat/`
+   - Types: `docs/`, `spec/`, `fix/`, `feat/`, `hardware/`, `transport/`
 3. Make your changes
 4. Commit with a clear message (see Commit Format below)
 5. Push and open a Pull Request
@@ -73,18 +96,23 @@ Types:
 - `fix` — bug or spec correction
 - `feat` — new feature or capability
 - `security` — security-related change
+- `hardware` — hardware specification change
+- `transport` — mesh transport adapter
 - `chore` — maintenance, tooling
 
 ---
 
 ## What Will Be Rejected
 
-- Changes that introduce a single point of trust or central authority
+- Changes that introduce a single point of trust or central directory authority
 - Changes that weaken anonymity properties
+- Changes that re-introduce guard mode (replaced by DHT Pools)
 - Changes that break backward compatibility without a versioning migration path
+- Changes that weaken pool trust isolation between segments
 - "Just trust us" changes without cryptographic enforcement
 - Code without tests (once implementation phase begins)
 - Protocol changes without updated specification
+- Any change that causes routing policy to log prohibited data (client IPs, destinations, path_id, path composition, session identifiers)
 
 ---
 
@@ -95,6 +123,7 @@ If your contribution involves cryptographic primitives, algorithms, or protocol 
 - You must cite prior art and security analysis
 - Changes will not be accepted based on performance alone if they reduce security margins
 - No home-grown cryptographic primitives will be accepted
+- Proposed cover traffic mechanisms must maintain external indistinguishability from RELAY traffic (both use session_key)
 
 ---
 
