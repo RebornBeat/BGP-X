@@ -1,8 +1,8 @@
 # BGP-X
 
-**BGP-X** is a router-level privacy overlay network. It runs on your network router and protects all connected devices transparently — or on a standalone device, or embedded directly in an application.
+**BGP-X** is a router-level privacy overlay network and inter-protocol domain router. It runs on your network router and protects all connected devices transparently — or on a standalone device, or embedded directly in an application.
 
-BGP-X does not replace the Border Gateway Protocol. It uses the public internet as a dumb transport substrate while implementing a parallel, privacy-first routing plane that is identity-based, multi-hop by default, and cryptographically enforced at every layer.
+BGP-X does not replace the Border Gateway Protocol. It uses the public internet as one of several transport substrates while implementing a parallel, privacy-first routing plane that is identity-based, multi-hop by default, cryptographically enforced at every layer, and capable of routing between multiple network domains without restriction.
 
 ---
 
@@ -24,14 +24,19 @@ BGP-X is built to solve a different problem:
 
 ## What BGP-X Is
 
-BGP-X is a **router-level privacy overlay network** with the following design properties:
+BGP-X is a **router-level privacy overlay network and inter-protocol domain router** with the following design properties:
 
 - **Router-centric**: runs on your network router and protects all connected devices — no per-device configuration required
 - **Identity-based addressing**: nodes and services identified by cryptographic public keys, not IP addresses
+- **Three equal entry points**: clearnet internet, BGP-X overlay, and mesh islands — any entry point reaches any destination
+- **Cross-domain routing**: route through any combination of clearnet, overlay, and mesh domains in any order, any number of times
 - **Client-selected paths**: the sender constructs the complete relay path before transmitting
+- **N-hop unlimited**: no protocol-level maximum on path length, domain count, or segment count
 - **Layered onion encryption**: each relay decrypts only its own layer; no relay sees both source and destination
-- **No central directory**: decentralized DHT-based node discovery with signed peer advertisements
+- **No central directory**: decentralized DHT-based node discovery with signed peer advertisements — one unified DHT spanning all routing domains
 - **DHT Pools**: configurable trust segments — public, curated, private, semi-private — enabling double-exit architecture and jurisdiction-specific routing
+- **Domain bridge nodes**: nodes with endpoints in multiple routing domains enable any-to-any cross-domain connectivity
+- **Mesh island routing**: named mesh island networks are first-class routing domains — addressable, discoverable, and reachable from clearnet without any special client hardware
 - **Gateway interoperability**: designated exit nodes bridge the overlay to the existing internet
 - **Forward secrecy**: ephemeral session keys ensure past sessions cannot be decrypted
 - **Encrypted Client Hello (ECH)**: exit nodes support ECH to hide the destination domain name from SNI when the destination publishes ECH configuration
@@ -40,6 +45,28 @@ BGP-X is a **router-level privacy overlay network** with the following design pr
 - **Cover traffic**: COVER packets are cryptographically indistinguishable from RELAY packets to external observers — both use the session key
 - **Geographic plausibility scoring**: RTT-based verification of node region claims (no external database required)
 - **path_id return routing**: 8-byte random path identifier enables return traffic routing without leaking path composition
+
+---
+
+## Routing Domains
+
+BGP-X treats three network classes as equal first-class citizens:
+
+```
+┌─────────────────┐         ┌───────────────────┐         ┌──────────────────┐
+│  CLEARNET/BGP   │◄───────►│   BGP-X OVERLAY   │◄───────►│   MESH ISLANDS   │
+│                 │  Domain │                   │  Domain │                  │
+│ Standard TCP/IP │  Bridge │ Onion-encrypted   │  Bridge │ WiFi mesh        │
+│ BGP routing     │ Nodes   │ ChaCha20-Poly1305 │ Nodes   │ LoRa radio       │
+│ Client device   │◄───────►│ DHT P2P discovery │◄───────►│ BLE              │
+│ Server on inet  │         │ Multi-hop paths   │         │ Ethernet P2P     │
+└─────────────────┘         └───────────────────┘         └──────────────────┘
+         ▲                          ▲  ▲                           ▲
+         │                          │  │                           │
+         └─────── Any combination, any order, unlimited hops ──────┘
+```
+
+A clearnet user with no BGP-X router can reach a mesh island service. A mesh user with no ISP can reach clearnet via a gateway. Two islands connect through the overlay. Three domains in sequence: valid. Fifteen hops across four domains: valid. The protocol imposes no ordering, no count limit.
 
 ---
 
@@ -61,14 +88,14 @@ BGP-X is a **router-level privacy overlay network** with the following design pr
 | Type | Description | Configuration Required |
 |---|---|---|
 | Standard Application | Any app that doesn't use the SDK; transparently protected via router | None — just connect to the network |
-| BGP-X Native Application | Uses the SDK to control paths, pools, ECH; can register as native services | SDK integration |
+| BGP-X Native Application | Uses the SDK to control paths, pools, domains, ECH; can register as native services | SDK integration |
 | Configuration Client | bgpx-cli and GUI tools; connects to daemon via Control Socket | Socket access |
 
 ---
 
 ## BGP and BGP-X Relationship
 
-BGP-X uses the BGP-routed internet as a transport layer. BGP-X packets are ordinary UDP datagrams from BGP's perspective — opaque, encrypted, indistinguishable from any other UDP traffic. BGP-X does not participate in BGP peering, does not announce routes, and does not require any ISP or infrastructure changes.
+BGP-X uses the BGP-routed internet as one transport layer among several. BGP-X packets are ordinary UDP datagrams from BGP's perspective — opaque, encrypted, indistinguishable from any other UDP traffic. BGP-X does not participate in BGP peering, does not announce routes, and does not require any ISP or infrastructure changes.
 
 For mesh deployments (Modes 4-6), BGP-X operates with zero BGP involvement for intra-mesh traffic. Coverage gaps between mesh islands are bridged via internet relay pools transparently and privately.
 
@@ -99,7 +126,7 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 - **I2P**: garlic routing for anonymous services
 - **Meshtastic**: LoRa mesh hardware and protocol
 
-**What BGP-X uniquely combines**: multi-hop onion routing + mesh transport native + clearnet exit model + decentralized DHT discovery + pool-based trust domains + hardware targets — unified into one coherent system.
+**What BGP-X uniquely combines**: multi-hop onion routing + cross-domain inter-protocol routing + mesh transport native + clearnet exit model + decentralized unified DHT + pool-based trust domains + N-hop unlimited path construction + hardware targets — unified into one coherent system.
 
 ---
 
@@ -107,16 +134,17 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 
 | Property | Tor | BGP-X |
 |---|---|---|
-| Architecture | Fixed 3-hop circuit | Variable N-hop path, client-configurable |
-| Directory model | Centralized directory authorities | Decentralized DHT + signed advertisements |
+| Architecture | Fixed 3-hop circuit | Variable N-hop path, client-configurable, no maximum |
+| Directory model | Centralized directory authorities | Decentralized unified DHT spanning all routing domains |
 | Transport | TCP streams | UDP-native with reliability layer |
 | Identity model | Single anonymous identity per circuit | Cryptographic identity; rotatable per session |
 | Path length | Fixed 3 hops | Configurable; no global enforcement maximum |
+| Domain routing | None | Cross-domain: clearnet ↔ overlay ↔ mesh in any order |
+| Entry points | Internet only | Clearnet, BGP-X overlay, or mesh — any is first-class |
 | Congestion control | None (TCP passthrough) | Native BGP-X congestion and backpressure |
 | Multiplexing | Single stream per circuit | Native stream multiplexing over single path |
 | Exit model | Any volunteer relay can exit | Designated, signed, policy-publishing exit nodes |
 | Network layer | Application proxy (SOCKS5) | Full IP overlay via TUN interface |
-| BGP awareness | None | Uses BGP as transport; aware of coverage gaps |
 | Cover traffic | Optional, not default | Pluggable; uses session_key; externally indistinguishable |
 | Firmware support | No | Yes — router firmware targets |
 | Path trust model | Assumes 1 in 3 hops honest | Configurable; reputation-weighted selection |
@@ -124,6 +152,7 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 | ECH at exit | No | Yes — hides SNI when destination supports it |
 | Mesh transport | No | Yes — WiFi mesh, LoRa, Bluetooth |
 | Hardware ecosystem | No | Yes — unified BGP-X Node platform |
+| Cross-domain routing | No | Yes — any combination of network domains |
 
 ---
 
@@ -135,6 +164,7 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 [BGP-X Router Daemon]
   Routing Policy Engine decides per-flow:
   ├── BGP-X overlay → Entry → Relay → Relay → Exit → Clearnet
+  ├── BGP-X cross-domain → Entry → [clearnet relays] → Bridge → [mesh relays] → Mesh Service
   └── Standard routing → Direct WAN → Clearnet
          ↓
 [Three Interfaces]
@@ -155,6 +185,7 @@ BGP-X is explicit about what it does not guarantee:
 - **ISP can observe BGP-X participation**: your ISP sees encrypted UDP/7474 traffic to BGP-X entry nodes; pluggable transport mitigates this
 - **Application-layer identity leakage**: BGP-X cannot prevent an app from revealing your identity via cookies, logins, or fingerprinting
 - **Compromised device**: BGP-X cannot protect traffic from malware on your device
+- **Cross-domain bridge availability**: if no bridge node exists between two domains, cross-domain connectivity is not possible for that pair
 - **No legal protection**: BGP-X does not make illegal activities legal
 
 ---
@@ -168,10 +199,11 @@ BGP-X is explicit about what it does not guarantee:
 ├── CHANGELOG.md                — Version history
 ├── CONTRIBUTING.md             — Contribution guidelines
 ├── CODE_OF_CONDUCT.md          — Community standards
-├── LICENSE                     — Apache 2.0
+├── LICENSE                     — MIT
 ├── SECURITY.md                 — Vulnerability reporting
 ├── /docs                       — User-facing documentation
 ├── /protocol                   — Protocol specification
+│   └── routing_domains.md      — Cross-domain routing (new)
 ├── /control-plane              — Routing logic and node management
 ├── /data-plane                 — Packet forwarding and encryption
 ├── /node                       — Node daemon specification
@@ -201,6 +233,7 @@ Phase plan:
 - [x] Protocol specification
 - [x] Security model
 - [x] Mesh architecture
+- [x] Cross-domain routing (inter-protocol domain router model)
 - [x] Hardware specification
 - [ ] Reference implementation (Rust)
 - [ ] Testnet
@@ -210,13 +243,4 @@ Phase plan:
 
 ## License
 
-MIT See [LICENSE](./LICENSE).
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
-## Security
-
-To report a vulnerability, see [SECURITY.md](./SECURITY.m
+MIT. See [LICENSE](./LICENSE).
