@@ -2,224 +2,191 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the BGP-X Control API — the interface by which local applications, management tools, and the BGP-X CLI interact with a running BGP-X node or client daemon.
-
 ---
 
 ## 1. Overview
 
-The Control API is a local-only, Unix domain socket API. It is not exposed over the network and is not part of the BGP-X overlay protocol. It provides:
+The Control API is a local-only Unix domain socket API. It provides full daemon management capabilities. It is NOT exposed over the network and is NOT part of the BGP-X overlay protocol.
 
-- Node status and statistics
-- Path management
-- Reputation database access
-- Node advertisement management
-- Configuration updates
-- Shutdown and lifecycle management
+**Location**: `/var/run/bgpx/control.sock` (system) or `/tmp/bgpx-<uid>/control.sock` (user mode)
 
-The Control API uses JSON-RPC 2.0 over a Unix domain socket at:
+**Protocol**: JSON-RPC 2.0 over Unix domain socket, newline-delimited messages
 
-```
-/var/run/bgpx/control.sock  (default, root-owned)
-/tmp/bgpx-<uid>/control.sock  (user mode)
-```
+**Authentication**: Unix socket file permissions (0600 by default)
+
+**Network exposure**: MUST NOT be exposed over the network.
 
 ---
 
-## 2. Authentication
-
-Access to the Control API is controlled by Unix socket file permissions. The socket file is owned by the user running the BGP-X daemon and has permissions 0600 (owner read/write only) by default.
-
-Operators who wish to grant additional users API access should use group ownership and 0660 permissions rather than exposing the socket over the network.
-
-There is no token-based authentication for the local Control API. Network exposure of the Control API is not supported and MUST NOT be implemented.
-
----
-
-## 3. JSON-RPC 2.0 Transport
-
-Requests and responses are newline-delimited JSON-RPC 2.0 messages over the Unix domain socket.
-
-Example request:
+## 2. Transport
 
 ```json
+// Request
 {"jsonrpc": "2.0", "id": 1, "method": "get_status", "params": {}}
-```
 
-Example response:
+// Response
+{"jsonrpc": "2.0", "id": 1, "result": { ... }}
 
-```json
-{"jsonrpc": "2.0", "id": 1, "result": {"state": "ACTIVE", "uptime_seconds": 3600}}
-```
-
-Example error response:
-
-```json
+// Error
 {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "Method not found"}}
 ```
 
 ---
 
-## 4. Method Catalog
+## 3. Method Catalog
 
-### 4.1 Node lifecycle methods
+### 3.1 Node Lifecycle
 
 #### `get_status`
-
-Returns the current operational state of the node or client daemon.
-
-**Parameters**: none
-
-**Result**:
 
 ```json
 {
   "state": "ACTIVE",
   "uptime_seconds": 86400,
   "version": "0.1.0",
-  "node_id": "a3f2...b9c1",
+  "node_id": "a3f2...",
   "roles": ["relay", "entry"],
   "active_sessions": 42,
   "active_streams": 117,
   "bytes_relayed_total": 10737418240,
-  "advertisement_expires_at": "2026-04-25T12:00:00Z"
+  "advertisement_expires_at": "2026-04-25T12:00:00Z",
+  "bridge_capable": true,
+  "active_domains": ["clearnet", "mesh:lima-district-1"],
+  "active_bridges": [{"from": "clearnet", "to": "mesh:lima-district-1", "available": true}],
+  "cross_domain_paths_active": 3,
+  "mesh_active": true,
+  "gateway_active": true,
+  "pt_enabled": false,
+  "ech_capable": true
 }
 ```
-
-State values: `INITIAL`, `BOOTSTRAP`, `ACTIVE`, `DRAIN`, `STOP`
-
----
 
 #### `shutdown`
 
-Initiates graceful shutdown. The daemon enters DRAIN state, completes in-flight sessions, and exits.
-
-**Parameters**:
-
-```json
-{
-  "timeout_seconds": 30
-}
-```
-
-**Result**:
-
-```json
-{
-  "accepted": true,
-  "drain_timeout_seconds": 30
-}
-```
-
----
+Parameters: `{"timeout_seconds": 30, "publish_withdrawal": true}`
 
 #### `reload_config`
 
-Reloads the node configuration from disk without restarting. Not all configuration options can be reloaded without restart — non-reloadable options are listed in the result.
-
-**Parameters**: none
-
-**Result**:
-
-```json
-{
-  "reloaded": true,
-  "reloaded_options": ["max_sessions", "bandwidth_limit_mbps"],
-  "requires_restart": ["listen_port", "node_private_key_path"]
-}
-```
+Reload config from disk. Returns reloaded and requires-restart options.
 
 ---
 
-### 4.2 Path management methods (client daemon only)
+### 3.2 Path Management
 
 #### `list_paths`
 
-Returns all currently active paths.
-
-**Parameters**: none
-
-**Result**:
-
-```json
-{
-  "paths": [
-    {
-      "path_id": "550e8400-e29b-41d4-a716-446655440000",
-      "hops": 4,
-      "age_seconds": 120,
-      "active_streams": 3,
-      "bytes_sent": 1048576,
-      "bytes_received": 5242880,
-      "latency_ms": 145,
-      "status": "healthy"
-    }
-  ]
-}
-```
-
----
+Returns all active paths. Per-path: hops, age, active_streams, bytes_sent/received, latency_ms, quality_score, pool_per_segment, exit_jurisdiction, exit_logging_policy, domain_segments, total_domains, is_cross_domain. No path_id or node identifiers.
 
 #### `build_path`
 
-Requests the client to build a new path immediately.
-
-**Parameters**:
-
 ```json
 {
-  "hops": 4,
+  "domain_segments": [
+    { "type": "segment", "domain": "clearnet", "pool": "bgpx-default", "hops": 2 },
+    { "type": "bridge", "from_domain": "clearnet", "to_domain": "mesh:lima-district-1" },
+    { "type": "segment", "domain": "mesh:lima-district-1", "hops": 2 }
+  ],
   "constraints": {
-    "exit_jurisdiction_blacklist": ["US", "GB"],
+    "exit_jurisdiction_blacklist": ["US"],
     "exit_logging_policy": "none",
+    "require_ech": false,
     "min_reputation_score": 70
   }
 }
 ```
 
-**Result**:
-
-```json
-{
-  "path_id": "550e8400-e29b-41d4-a716-446655440001",
-  "hops": 4,
-  "build_time_ms": 342,
-  "status": "ready"
-}
-```
-
----
+Legacy `segments` (pool-only) format also accepted for single-domain paths.
 
 #### `destroy_path`
 
-Destroys a specific path and tears down all its sessions.
-
-**Parameters**:
-
-```json
-{
-  "path_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-**Result**:
-
-```json
-{
-  "destroyed": true,
-  "streams_closed": 3
-}
-```
+Parameters: `{"path_index": 0}` (index in list_paths result).
 
 ---
 
-### 4.3 Node database methods
+### 3.3 Routing Policy Management
+
+#### `list_rules`
+
+List all routing policy rules in evaluation order with IDs, match criteria, actions.
+
+#### `add_rule`
+
+```json
+{
+  "position": 5,
+  "match": {
+    "destination_domain": ["*.sensitive.com"]
+  },
+  "action": "bgpx",
+  "path_constraints": {
+    "domain_segments": [
+      { "type": "segment", "domain": "clearnet", "pool": "bgpx-default", "hops": 2 },
+      { "type": "bridge", "from_domain": "clearnet", "to_domain": "mesh:trusted-island" },
+      { "type": "segment", "domain": "mesh:trusted-island", "hops": 2 },
+      { "type": "bridge", "from_domain": "mesh:trusted-island", "to_domain": "clearnet" },
+      { "type": "segment", "domain": "clearnet", "pool": "private-exits", "hops": 1, "exit": true }
+    ],
+    "require_ech": true
+  },
+  "reason": "high-security-via-mesh"
+}
+```
+
+#### `remove_rule`
+
+Parameters: `{"rule_id": "rule-abc123"}`
+
+#### `reorder_rule`
+
+Parameters: `{"rule_id": "rule-abc123", "new_position": 2}`
+
+#### `test_destination`
+
+Parameters: `{"destination": "example.com", "device_ip": "192.168.1.50", "protocol": "tcp", "port": 443}`
+
+Returns: matching rule, action, path constraints that would be applied (including any domain_segments).
+
+#### `reload_policy`
+
+#### `set_routing_policy_default`
+
+Parameters: `{"default_action": "bgpx"}` or `{"default_action": "standard"}`
+
+#### `get_routing_policy_stats`
+
+Returns aggregate packet counts per rule category. No identifiers.
+
+---
+
+### 3.4 Pool Management
+
+#### `list_pools`
+
+Parameters: `{"filter": {"type": "curated", "min_active_members": 5, "domain_scope": "mesh:lima-district-1"}}`
+
+Result includes `domain_scope` field per pool.
+
+#### `get_pool`
+
+Retrieve full pool details and member list.
+
+#### `add_pool`
+
+Add a private pool. Accepts domain-scoped pool advertisements.
+
+#### `remove_pool`, `verify_pool`, `refresh_pool`, `rotate_pool_key`
+
+All unchanged.
+
+#### `list_mesh_pools`
+
+List pools scoped to mesh island domains.
+
+---
+
+### 3.5 Node Database Management
 
 #### `list_nodes`
-
-Returns nodes from the local node database, with optional filtering.
-
-**Parameters**:
 
 ```json
 {
@@ -227,7 +194,13 @@ Returns nodes from the local node database, with optional filtering.
     "roles": ["exit"],
     "region": "EU",
     "min_reputation": 70,
-    "min_uptime_pct": 90
+    "min_uptime_pct": 90,
+    "pool": "pool-id-hex",
+    "ech_capable": true,
+    "mesh_transport": "lora",
+    "domain": "mesh:lima-district-1",
+    "bridge_capable": true,
+    "bridge_to_domain": "clearnet"
   },
   "limit": 50,
   "offset": 0,
@@ -236,165 +209,59 @@ Returns nodes from the local node database, with optional filtering.
 }
 ```
 
-**Result**:
-
-```json
-{
-  "total": 87,
-  "nodes": [
-    {
-      "node_id": "a3f2...b9c1",
-      "roles": ["relay", "entry"],
-      "country": "DE",
-      "region": "EU",
-      "asn": 12345,
-      "reputation_score": 91.2,
-      "uptime_pct": 99.1,
-      "latency_ms": 12,
-      "bandwidth_mbps": 100,
-      "advertisement_expires_at": "2026-04-25T12:00:00Z",
-      "blacklisted": false
-    }
-  ]
-}
-```
-
----
-
 #### `get_node`
 
-Returns full details for a specific node.
+Full details including reputation event history (last 50 events) and bridge records.
 
-**Parameters**:
+#### `blacklist_node`, `unblacklist_node`, `clear_blacklist_entry`
 
-```json
-{
-  "node_id": "a3f2...b9c1"
-}
-```
-
-**Result**: Full node database record including reputation event history (last 50 events).
+All unchanged.
 
 ---
 
-#### `blacklist_node`
+### 3.6 Advertisement Management
 
-Manually blacklists a node. Overrides reputation-based evaluation.
+#### `get_advertisement`, `republish_advertisement`, `update_performance_metrics`, `withdraw_advertisement`
 
-**Parameters**:
-
-```json
-{
-  "node_id": "a3f2...b9c1",
-  "reason": "manual_operator_blacklist",
-  "note": "Operator reported this node is acting maliciously",
-  "duration_hours": 720
-}
-```
-
-**Result**:
-
-```json
-{
-  "blacklisted": true,
-  "effective_until": "2026-05-24T12:00:00Z"
-}
-```
+All unchanged. `get_advertisement` result now includes `routing_domains` and `bridges` fields.
 
 ---
 
-#### `unblacklist_node`
+### 3.7 ECH Management
 
-Removes a manual blacklist entry. Cannot remove permanent blacklist entries (cryptographic violation).
+#### `get_ech_cache`, `clear_ech_cache`, `test_ech`
 
-**Parameters**:
-
-```json
-{
-  "node_id": "a3f2...b9c1"
-}
-```
-
-**Result**:
-
-```json
-{
-  "unblacklisted": true
-}
-```
+All unchanged.
 
 ---
 
-### 4.4 Advertisement management methods (node daemon only)
+### 3.8 SDK Socket Configuration
 
-#### `get_advertisement`
+#### `get_sdk_socket_config`, `set_sdk_tcp_listen`, `set_sdk_tcp_auth`
 
-Returns the node's current published advertisement.
-
-**Parameters**: none
-
-**Result**: Current signed node advertisement JSON.
+All unchanged.
 
 ---
 
-#### `republish_advertisement`
+### 3.9 Mesh Management
 
-Forces immediate re-publication of the node advertisement to the DHT.
+#### `list_transports`, `get_transport_stats`, `force_beacon`, `get_mesh_peers`, `get_gateway_status`
 
-**Parameters**: none
-
-**Result**:
-
-```json
-{
-  "published": true,
-  "storage_nodes_reached": 18,
-  "new_expires_at": "2026-04-25T12:00:00Z"
-}
-```
+All unchanged. `get_gateway_status` renamed to `get_domain_bridge_status` (alias retained for backward compatibility).
 
 ---
 
-#### `update_performance_metrics`
+### 3.10 Session Management
 
-Updates the self-reported performance metrics in the node advertisement.
+#### `get_session_rehandshake_status`, `force_session_rehandshake`
 
-**Parameters**:
-
-```json
-{
-  "bandwidth_mbps": 200,
-  "latency_ms": 10,
-  "uptime_pct": 99.5
-}
-```
-
-**Result**:
-
-```json
-{
-  "updated": true,
-  "republished": true
-}
-```
+All unchanged.
 
 ---
 
-### 4.5 Statistics methods
+### 3.11 Statistics
 
 #### `get_stats`
-
-Returns aggregate operational statistics.
-
-**Parameters**:
-
-```json
-{
-  "window_seconds": 3600
-}
-```
-
-**Result**:
 
 ```json
 {
@@ -417,146 +284,173 @@ Returns aggregate operational statistics.
   "blacklisted_nodes": 2,
   "path_constructions_attempted": 45,
   "path_constructions_succeeded": 44,
-  "path_constructions_failed": 1
+  "path_constructions_failed": 1,
+  "cross_domain_path_constructions": 12,
+  "domain_bridge_transitions_total": 34,
+  "mesh_island_paths_active": 3,
+  "pool_count": 3,
+  "pool_construction_attempts": 12,
+  "geo_plausibility_events": 5,
+  "ech_connections_total": 89,
+  "ech_fallback_total": 3,
+  "mesh_sessions_active": 4,
+  "pt_active": false,
+  "routing_policy_bgpx_count": 8940,
+  "routing_policy_standard_count": 3210,
+  "routing_policy_block_count": 15,
+  "cross_domain_path_table_size": 18,
+  "bridge_nodes_in_database": 7,
+  "island_advertisements_cached": 3
 }
 ```
 
-Note: No session identifiers, node identifiers (beyond counts), or client IP addresses are included in statistics.
+No session identifiers, node identifiers beyond counts, or client IP addresses.
 
 ---
 
-#### `get_dht_stats`
+### 3.12 Domain Management (New Methods)
 
-Returns DHT-specific statistics.
-
-**Parameters**: none
-
-**Result**:
+#### `list_domains`
 
 ```json
 {
-  "routing_table_size": 342,
-  "buckets_active": 28,
-  "estimated_network_size": 4200,
-  "bootstrap_nodes_reachable": 5,
-  "last_advertisement_publish": "2026-04-24T06:00:00Z",
-  "storage_records_held": 87
+  "domains": [
+    {
+      "domain_id": "0x00000001-00000000",
+      "domain_type": "clearnet",
+      "served_by_this_node": true,
+      "active_relay_count": 0,
+      "bridge_node_count": 15
+    },
+    {
+      "domain_id": "0x00000003-a1b2c3d4",
+      "domain_type": "mesh",
+      "island_id": "lima-district-1",
+      "served_by_this_node": true,
+      "active_relay_count": 8,
+      "bridge_node_count": 2,
+      "online": true,
+      "last_seen": "2026-04-24T12:00:00Z"
+    }
+  ]
 }
 ```
 
----
+#### `list_domain_bridges`
 
-### 4.6 Configuration methods
+Parameters: `{"from_domain": "clearnet", "to_domain": "mesh:lima-district-1", "min_reputation": 70.0}`
 
-#### `get_config`
+Result: list of bridge node summaries (no node IDs in exported result — reputation and availability aggregates only).
 
-Returns the current active configuration (non-sensitive fields only — key paths are shown but key material is never returned).
+#### `get_island_status`
 
-**Parameters**: none
-
-**Result**: Current configuration as JSON, with sensitive fields redacted.
-
----
-
-#### `set_config`
-
-Updates specific configuration values that support live reload.
-
-**Parameters**:
+Parameters: `{"island_id": "lima-district-1"}`
 
 ```json
 {
-  "max_sessions": 1000,
-  "bandwidth_limit_mbps": 500,
-  "keepalive_interval_seconds": 25
+  "island_id": "lima-district-1",
+  "domain_id": "0x00000003-a1b2c3d4",
+  "online": true,
+  "active_relay_count": 8,
+  "bridge_node_count": 2,
+  "registered_services": 1,
+  "dht_coverage": "full",
+  "last_advertisement": "2026-04-24T12:00:00Z"
 }
 ```
 
-**Result**:
+#### `list_islands`
+
+Parameters: `{"filter": {"online_only": true, "has_services": true}}`
+
+#### `test_domain_connectivity`
+
+Parameters: `{"target_domain": "mesh:lima-district-1", "via_bridge": null}`
 
 ```json
 {
-  "updated": ["max_sessions", "bandwidth_limit_mbps", "keepalive_interval_seconds"],
-  "requires_restart": []
+  "reachable": true,
+  "bridge_node_count": 2,
+  "best_bridge_latency_ms": 25,
+  "test_path_constructed": true,
+  "test_path_hops": 6
 }
 ```
 
+#### `discover_bridge_nodes`
+
+Force-fetch bridge node records from DHT for a domain pair.
+
+Parameters: `{"from_domain": "clearnet", "to_domain": "mesh:lima-district-1"}`
+
 ---
 
-## 5. Error Codes
+### 3.13 Configuration
 
-BGP-X Control API uses standard JSON-RPC 2.0 error codes plus custom codes:
+#### `get_config`, `set_config`
+
+`get_config` result now includes `routing_domains` and `domain_bridge` configuration sections (key paths shown, key material never returned).
+
+---
+
+## 4. Error Codes
+
+All previous error codes retained. New:
 
 | Code | Meaning |
 |---|---|
-| -32700 | Parse error |
-| -32600 | Invalid request |
-| -32601 | Method not found |
-| -32602 | Invalid params |
-| -32603 | Internal error |
-| -32000 | Node not found |
-| -32001 | Path not found |
-| -32002 | Daemon not in correct state for this operation |
-| -32003 | Permission denied |
-| -32004 | Path construction failed |
-| -32005 | Cannot unblacklist permanent blacklist |
-| -32006 | Configuration value not live-reloadable |
+| -32013 | Domain not found |
+| -32014 | Domain bridge unavailable |
+| -32015 | Mesh island unreachable |
+| -32016 | Cross-domain path construction failed |
+| -32017 | Domain scope mismatch in pool |
+| -32018 | No cross-domain path found |
 
 ---
 
-## 6. Streaming Events (Subscriptions)
+## 5. Event Subscriptions
 
-The Control API supports event subscriptions for monitoring applications.
+All previous events retained. New events:
 
-#### `subscribe`
+| Event | Description |
+|---|---|
+| `domain_bridge_online` | A domain bridge node for a watched pair became active |
+| `domain_bridge_offline` | A domain bridge node became unreachable |
+| `mesh_island_discovered` | A new mesh island advertisement found in DHT |
+| `mesh_island_unreachable` | All bridges to a mesh island are offline |
+| `mesh_island_online` | Mesh island regained bridge connectivity |
+| `cross_domain_path_built` | A cross-domain path was successfully constructed |
+| `cross_domain_path_rebuilt` | A cross-domain path was rebuilt after failure |
+| `bridge_availability_changed` | A bridge pair's availability status changed |
 
-Subscribe to a stream of events.
-
-**Parameters**:
-
-```json
-{
-  "events": ["session_opened", "session_closed", "path_built", "node_blacklisted", "keepalive_timeout"]
-}
-```
-
-After subscribing, the daemon sends newline-delimited JSON event objects on the same socket connection:
-
-```json
-{"event": "session_opened", "timestamp": "2026-04-24T12:00:01Z", "session_count": 43}
-{"event": "keepalive_timeout", "timestamp": "2026-04-24T12:00:45Z"}
-{"event": "path_built", "timestamp": "2026-04-24T12:01:00Z", "hops": 4, "build_time_ms": 280}
-```
-
-Note: Event data MUST NOT include node IDs, session IDs, or any information that could identify specific nodes or clients.
+Event data MUST NOT include node IDs linked to paths, session IDs, client IPs, or path composition.
 
 ---
 
-## 7. CLI Usage
+## 6. CLI Usage Examples
 
-The BGP-X CLI (`bgpx-cli`) is a thin wrapper over the Control API. It connects to the local control socket and formats responses for human consumption.
-
-Example CLI commands:
+All previous CLI commands retained. New:
 
 ```bash
-# Check node status
-bgpx-cli status
+# Domain management
+bgpx-cli domains list
+bgpx-cli domains bridges --from clearnet --to "mesh:lima-district-1"
+bgpx-cli domains island-status --island-id lima-district-1
+bgpx-cli domains list-islands
+bgpx-cli domains test --from clearnet --to "mesh:lima-district-1"
+bgpx-cli domains discover-bridges --from clearnet --to "mesh:lima-district-1"
 
-# List active paths
-bgpx-cli paths list
+# Cross-domain path building
+bgpx-cli paths build \
+    --domain-segments "clearnet:2,bridge:clearnet→mesh:lima-1,mesh:lima-1:2"
 
-# Build a new path with constraints
-bgpx-cli paths build --hops 5 --exit-country DE --no-log
+# Standard single-domain path building (unchanged)
+bgpx-cli paths build --segments "default:3,private-exits:1"
 
-# List nodes by reputation
-bgpx-cli nodes list --role exit --region EU --min-reputation 80
+# Extended node filtering
+bgpx-cli nodes list --domain "mesh:lima-district-1" --bridge-capable
+bgpx-cli nodes list --bridge-to "clearnet"
 
-# Blacklist a node
-bgpx-cli nodes blacklist <node_id> --reason "suspected MITM" --duration 720h
-
-# View statistics
-bgpx-cli stats --window 1h
-
-# Watch live events
-bgpx-cli events watch
+# Events including cross-domain
+bgpx-cli events watch --filter domain_bridge,mesh_island,cross_domain_path
 ```
