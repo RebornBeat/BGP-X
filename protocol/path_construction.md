@@ -2,289 +2,472 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies how BGP-X clients select and construct relay paths through the overlay network.
-
 ---
 
 ## 1. Overview
 
-Path construction is the process by which a BGP-X client selects an ordered sequence of relay nodes to form a path from the client to its destination. BGP-X uses **client-side path selection** — the sending party constructs the complete path before transmission. No relay node participates in path selection.
+Path construction is the process by which a BGP-X client selects an ordered sequence of relay nodes to form a path from client to destination. BGP-X uses **client-side path selection** — the sending party constructs the complete path before transmission.
 
-This is a fundamental design choice. Delegating path selection to the network (as BGP does) would allow network-level adversaries to influence routing. By keeping path selection at the client, BGP-X ensures that no single network entity can force all clients to route through a surveillance point.
+BGP-X path construction is **inter-protocol domain-aware**: paths may span multiple routing domains (clearnet, BGP-X overlay, mesh islands) in any order, any number of times, with no protocol-level maximum on total hops, domains, or transitions.
 
----
+No relay node participates in path selection. The client:
 
-## 2. Path Anatomy
-
-A path consists of three categories of nodes:
-
-```
-[Entry Node] → [Relay Nodes × 0..N] → [Exit Node]
-```
-
-| Role | Count | Minimum | Description |
-|---|---|---|---|
-| Entry | 1 | 1 | First hop. Knows client IP. |
-| Relay | 0..N | 0 | Middle hops. No knowledge of origin or destination. |
-| Exit | 1 | 1 | Last hop for clearnet. Knows destination. |
-
-Minimum total path length: **3 hops** (entry + 0 relays + exit, where entry ≠ exit)
-Default total path length: **4 hops** (entry + 2 relays + exit)
-
-For BGP-X native service connections (no clearnet exit needed), the last node in the path is the service's entry node. The exit node role is replaced by a delivery node.
+1. Determines the domain sequence required for the path
+2. Queries the unified DHT for candidate nodes per domain segment
+3. Discovers domain bridge nodes for each required domain transition
+4. Filters nodes using hard constraints
+5. Scores remaining nodes using a weighted function (domain-aware)
+6. Selects nodes using weighted random sampling with cross-domain diversity enforcement
+7. Verifies the assembled path meets diversity requirements
+8. Generates path_id (8 bytes, CSPRNG)
+9. Constructs onion-encrypted packets for the selected cross-domain path
 
 ---
 
-## 3. Path Selection Algorithm
+## 2. N-Hop Unlimited Policy
 
-### 3.1 Input
+BGP-X path construction imposes **no maximum on total path hops, domain count, domain traversal count, or segment count**.
 
-The path selection algorithm takes:
+The routing algorithm will construct a path of any length the client requests, provided:
+- Sufficient eligible nodes exist in each domain segment
+- Mandatory diversity constraints can be satisfied
+- The 3-hop absolute minimum is met
 
-- The set of available nodes from the DHT (filtered to valid, non-expired advertisements)
-- The path length N (default: 4)
-- Path constraints (see Section 4)
-- The current node blacklist (nodes flagged by reputation system)
+Practical defaults (per-path configuration, not enforced limits):
 
-### 3.2 Output
+| Path Type | Default Hops |
+|---|---|
+| Single-domain clearnet | 4 |
+| Cross-domain, 2 segments + 1 bridge | 7 (3+1+3) |
+| Cross-domain, 3 segments + 2 bridges | 10 (3+1+3+1+2) |
+| High-security application-specified | Any |
 
-An ordered list of N nodes: [n_1, n_2, ..., n_N] where n_1 is entry and n_N is exit (for clearnet).
-
-### 3.3 Algorithm
-
-```
-function select_path(nodes, length, constraints, blacklist):
-
-    # Step 1: Filter to eligible nodes
-    eligible = [n for n in nodes
-                if n not in blacklist
-                and n.signature_valid
-                and n.advertisement_not_expired
-                and n.uptime_pct >= MIN_UPTIME_PCT]
-
-    # Step 2: Filter for entry-capable nodes
-    entry_candidates = [n for n in eligible if "entry" in n.roles]
-
-    # Step 3: Filter for relay-capable nodes
-    relay_candidates = [n for n in eligible if "relay" in n.roles]
-
-    # Step 4: Filter for exit-capable nodes
-    exit_candidates = [n for n in eligible
-                       if "exit" in n.roles
-                       and exit_policy_acceptable(n.exit_policy, constraints)]
-
-    # Step 5: Select entry node
-    entry = weighted_random_select(entry_candidates,
-                                   weight_fn = score_node)
-
-    # Step 6: Select relay nodes (length - 2 of them)
-    relays = []
-    for i in range(length - 2):
-        eligible_relays = [n for n in relay_candidates
-                           if n != entry
-                           and n not in relays
-                           and diversity_ok(n, [entry] + relays, constraints)]
-        relay = weighted_random_select(eligible_relays, weight_fn = score_node)
-        relays.append(relay)
-
-    # Step 7: Select exit node
-    exit_candidates_filtered = [n for n in exit_candidates
-                                  if n != entry
-                                  and n not in relays
-                                  and diversity_ok(n, [entry] + relays, constraints)]
-    exit_node = weighted_random_select(exit_candidates_filtered,
-                                        weight_fn = score_node)
-
-    return [entry] + relays + [exit_node]
-```
-
-### 3.4 Node Scoring Function
-
-```
-function score_node(node):
-    score = 0.0
-    score += 0.40 * normalize(node.uptime_pct, 0, 100)
-    score += 0.30 * normalize(1 / (node.latency_ms + 1), 0, 1)
-    score += 0.20 * normalize(node.bandwidth_mbps, 0, MAX_BANDWIDTH)
-    score += 0.10 * normalize(node.reputation_score, 0, 100)
-    return score
-```
-
-Weighted random selection: nodes with higher scores are proportionally more likely to be selected, but all eligible nodes have a non-zero probability. This prevents deterministic path selection that could be exploited by a node with artificially inflated scores.
+The daemon logs a soft informational message when total hops exceeds 15 (high latency expected) but does NOT reject or limit the path.
 
 ---
 
-## 4. Path Constraints
+## 3. Path Anatomy
 
-Path constraints are enforced during node selection. Violating a constraint is a hard failure — the algorithm retries rather than relaxes the constraint.
-
-### 4.1 Mandatory Constraints
-
-These constraints MUST be enforced for all paths:
-
-#### 4.1.1 ASN Diversity
-
-No two nodes in the same path may have the same ASN (Autonomous System Number).
+A path consists of one or more **segments**, each within a single routing domain. Domain transitions between segments are handled by **domain bridge nodes**.
 
 ```
-for all pairs (n_i, n_j) in path where i ≠ j:
-    assert n_i.asn ≠ n_j.asn
+Single-domain path:
+  [Segment 1: clearnet, 4 hops]
+
+Cross-domain path (2 segments):
+  [Segment 1: clearnet, 3 hops] → [DOMAIN_BRIDGE] → [Segment 2: mesh:island-1, 3 hops]
+
+Cross-domain path (3 segments):
+  [Segment 1: clearnet, 2 hops] → [BRIDGE 1] → [Segment 2: mesh:island-A, 2 hops] → [BRIDGE 2] → [Segment 3: clearnet, 2 hops]
+
+Cross-domain path (any N):
+  Any combination, any order, any number of times, no limit
 ```
 
-Rationale: An adversary who controls a major ASN (e.g., a large transit provider) could observe traffic at multiple points in the path if two hops share the same AS.
-
-#### 4.1.2 Country Diversity
-
-No two nodes in the same path may be in the same country.
-
-```
-for all pairs (n_i, n_j) in path where i ≠ j:
-    assert n_i.country ≠ n_j.country
-```
-
-Rationale: Legal coercion operates at national boundaries. Two hops in the same country may both be subject to the same legal order.
-
-#### 4.1.3 Operator Diversity
-
-No two nodes in the same path may share an operator_id.
-
-```
-for all pairs (n_i, n_j) in path where i ≠ j:
-    if n_i.operator_id is not null and n_j.operator_id is not null:
-        assert n_i.operator_id ≠ n_j.operator_id
-```
-
-Rationale: An adversary who operates multiple nodes could place them in the same path if operator identity were not checked. This constraint prevents a single operator from controlling both entry and exit.
-
-#### 4.1.4 Node Uniqueness
-
-A node may not appear more than once in a path.
-
-```
-assert len(path) == len(set(node.node_id for node in path))
-```
-
-### 4.2 Default Constraints (Applied Unless Overridden)
-
-#### 4.2.1 Minimum Uptime
-
-```
-assert node.uptime_pct >= 85.0
-```
-
-Nodes with low uptime reduce path reliability and anonymity (frequent circuit rebuilds are observable).
-
-#### 4.2.2 Region Diversity
-
-At least two different regions (NA, EU, AP, SA, AF, ME) must be represented in the path.
-
-```
-regions = set(n.region for n in path)
-assert len(regions) >= 2
-```
-
-### 4.3 Optional Constraints (Configurable per Application)
-
-| Constraint | Description | Default |
-|---|---|---|
-| max_latency_ms | Maximum acceptable total path latency estimate | None |
-| min_bandwidth_mbps | Minimum bandwidth each hop must report | 10 |
-| min_reputation_score | Minimum node reputation score (0–100) | 60 |
-| exit_jurisdiction_whitelist | Only allow exits in listed countries | None |
-| exit_jurisdiction_blacklist | Exclude exits in listed countries | None |
-| exit_logging_policy | Only use exits with specific logging policy | None |
-| path_length | Override default path length | 4 |
-| geographic_spread_km | Minimum geographic distance between hops | None |
+**Minimum total path length**: 3 hops across the full path regardless of domain count.
 
 ---
 
-## 5. Retry Logic
+## 4. Domain Segment Configuration
 
-If path construction fails (no valid set of nodes satisfying all constraints):
+Path segments are specified with domain, pool, and hop count:
 
-1. **Retry with fresh DHT query** (up to 3 times): The node set may be stale.
-2. **Relax optional constraints** (in order of least privacy impact): Increase max_latency_ms, reduce min_bandwidth_mbps, reduce min_reputation_score.
-3. **Fail and report**: If mandatory constraints cannot be satisfied, path construction MUST fail. Do not relax mandatory constraints.
+```toml
+# Single-domain (existing syntax — backward compatible)
+segments = [
+    { pool = "bgpx-default", hops = 3 },
+    { pool = "my-private-exit", hops = 1, exit = true }
+]
 
-Applications SHOULD retry path construction after a delay (default: 5 seconds) when it fails.
+# Cross-domain (new syntax)
+domain_segments = [
+    { type = "segment", domain = "clearnet", pool = "bgpx-default", hops = 3 },
+    { type = "bridge", from_domain = "clearnet", to_domain = "mesh:lima-district-1" },
+    { type = "segment", domain = "mesh:lima-district-1", pool = "island-default", hops = 2 }
+]
 
----
+# Clearnet → mesh → clearnet
+domain_segments = [
+    { type = "segment", domain = "clearnet", pool = "bgpx-default", hops = 2 },
+    { type = "bridge", from_domain = "clearnet", to_domain = "mesh:trusted-island" },
+    { type = "segment", domain = "mesh:trusted-island", hops = 3 },
+    { type = "bridge", from_domain = "mesh:trusted-island", to_domain = "clearnet" },
+    { type = "segment", domain = "clearnet", pool = "private-exits", hops = 1, exit = true }
+]
 
-## 6. Path Caching and Reuse
+# Mesh-to-mesh via clearnet overlay
+domain_segments = [
+    { type = "segment", domain = "mesh:island-A", hops = 2 },
+    { type = "bridge", from_domain = "mesh:island-A", to_domain = "clearnet" },
+    { type = "segment", domain = "clearnet", pool = "bgpx-default", hops = 3 },
+    { type = "bridge", from_domain = "clearnet", to_domain = "mesh:island-B" },
+    { type = "segment", domain = "mesh:island-B", hops = 2 }
+]
+```
 
-Constructed paths MAY be cached and reused for subsequent connections within the same session window.
-
-### Cache TTL
-
-Default path cache TTL: **10 minutes**
-
-After TTL expiry, a new path MUST be constructed. Using the same path for extended periods increases the risk of traffic correlation.
-
-### Cache invalidation
-
-Cached paths MUST be invalidated if:
-
-- Any node in the path goes offline (detected via KEEPALIVE timeout)
-- A node in the path is flagged by the reputation system
-- The node's advertisement expires
-- The client explicitly requests a new path
-
-### Path isolation between applications
-
-Different applications or streams with different privacy requirements SHOULD use different paths, even within the same time window. High-sensitivity connections MUST NOT share a path with low-sensitivity connections.
-
----
-
-## 7. Guard Node Concept (Optional Extension)
-
-Tor uses a "guard node" concept where a small set of trusted entry nodes is maintained over time, reducing the probability that the entry node is adversary-controlled.
-
-BGP-X supports an optional guard mode:
-
-- The client selects a small set of trusted entry nodes (default: 3)
-- Entry nodes are chosen from this set for all paths
-- The guard set is refreshed every 30 days or when a guard goes offline
-
-Guard mode MUST be explicitly enabled. It is off by default because guard nodes learn more about a client's activity over time than random entry selection would allow.
+The `domain_bridge` field names the required transition. The routing algorithm discovers eligible bridge nodes for this transition from the unified DHT.
 
 ---
 
-## 8. Path Quality Monitoring
+## 5. Any-to-Any Connectivity
 
-Clients SHOULD monitor path quality during use:
+The path construction algorithm makes no assumption about which domain the client entered from. A clearnet client and a mesh client run the same algorithm. A path starting in any domain may include segments from any other domain.
 
-- Measure round-trip latency via KEEPALIVE timing
-- Track packet loss (inferred from sequence number gaps)
-- Track throughput
+All of the following domain sequences are valid:
 
-If path quality falls below acceptable thresholds:
+```
+clearnet → clearnet (standard single-domain)
+clearnet → mesh
+mesh → clearnet
+mesh → mesh (via overlay or direct bridge)
+clearnet → mesh → clearnet
+mesh → clearnet → mesh
+clearnet → mesh → mesh → clearnet
+clearnet → satellite → clearnet
+clearnet → mesh → satellite → clearnet
+[any combination, unlimited]
+```
 
-- Attempt to rebuild a new path
-- Report path quality data (without identifying information) to the reputation system
-
----
-
-## 9. Path Construction Timing
-
-Path construction is not instantaneous. Clients SHOULD pre-build paths before they are needed to avoid latency at connection time.
-
-Recommended behavior:
-
-- Maintain 2–3 pre-built paths ready for use
-- Begin rebuilding a path as soon as the previous one is used
-- For latency-sensitive applications, accept a pre-built path from the pool immediately rather than waiting for a fresh construction
+The protocol enforces no ordering. The algorithm constructs whatever sequence the client specifies.
 
 ---
 
-## 10. Bootstrap Path
+## 6. DHT Pools with Domain Scope
 
-When a client first joins the network with no DHT knowledge, it needs a bootstrap path to query the DHT.
+Pools may be scoped to a specific routing domain:
 
-Bootstrap sequence:
+```json
+{
+  "pool_id": "...",
+  "domain_scope": "mesh:lima-district-1",
+  "members": ["node_id_1", "node_id_2"],
+  ...
+}
+```
 
-1. Connect to a well-known bootstrap node (hardcoded in client distribution)
-2. Send DHT_FIND_NODE to discover nearby nodes
-3. Use the discovered nodes to construct a proper BGP-X path
-4. Re-route DHT queries through the constructed path
+`domain_scope` values:
+- `"any"` (default): pool contains nodes from any domain — backward compatible
+- `"clearnet"`: clearnet-reachable nodes only
+- `"mesh:<island_id>"`: nodes in specified mesh island only
+- `"bridge:clearnet→mesh:<island_id>"`: bridge nodes for this specific pair
 
-Bootstrap nodes MUST NOT be used as relay nodes in constructed paths. They serve only to provide initial DHT access.
+Domain-scoped pools are stored in the unified DHT. The `domain_scope` field identifies the pool's scope for client filtering.
+
+---
+
+## 7. Domain Bridge Discovery Algorithm
+
+```python
+function discover_domain_bridges(from_domain, to_domain):
+
+    # Compute symmetric bridge key
+    sorted_pair = sorted([from_domain.id_bytes, to_domain.id_bytes])
+    bridge_key = BLAKE3("bgpx-domain-bridge-v1" || sorted_pair[0] || sorted_pair[1])
+
+    # Query unified DHT
+    bridge_record = dht_get(bridge_key)
+    if bridge_record is None:
+        return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+    if not verify_bridge_record_signature(bridge_record):
+        return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+    # Individually verify each listed bridge node
+    verified_bridges = []
+    for node_id in bridge_record.bridge_nodes:
+        node_advert = fetch_node_advertisement(node_id)
+        if node_advert and verify_node_advertisement(node_advert):
+            if node_advert.bridge_capable:
+                if serves_both_domains(node_advert, from_domain, to_domain):
+                    if not is_blacklisted(node_id):
+                        verified_bridges.append(node_advert)
+
+    if not verified_bridges:
+        return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+    return verified_bridges
+```
+
+Individual node advertisement verification is MANDATORY — pool membership or bridge record inclusion alone is insufficient.
+
+---
+
+## 8. Cross-Domain Path Selection Algorithm
+
+```python
+function build_cross_domain_path(domain_segments, constraints):
+
+    all_selected = []
+    segment_results = []
+    current_domain = None
+
+    for i, segment in enumerate(domain_segments):
+
+        if segment.type == "bridge":
+            from_domain = get_previous_domain(domain_segments, i)
+            to_domain = get_next_domain(domain_segments, i)
+
+            bridge_candidates = discover_domain_bridges(from_domain, to_domain)
+            if bridge_candidates is FAIL:
+                if constraints.fallback_any_bridge:
+                    bridge_candidates = discover_any_bridge_to(to_domain)
+                if bridge_candidates is FAIL or not bridge_candidates:
+                    return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+            eligible = [n for n in bridge_candidates
+                        if n not in all_selected
+                        and diversity_ok(n, all_selected)]
+
+            if not eligible:
+                return FAIL(ERR_NO_CROSS_DOMAIN_PATH)
+
+            node = weighted_random_select(
+                eligible,
+                score_fn=score_bridge_node(from_domain, to_domain)
+            )
+            all_selected.append(node)
+            segment_results.append(('bridge', [node]))
+            current_domain = to_domain
+
+        elif segment.type == "segment":
+            domain = segment.domain or current_domain
+            pool = segment.pool or "bgpx-default"
+            hops = segment.hops
+
+            candidates = get_nodes_in_domain_and_pool(domain, pool)
+            candidates = [n for n in candidates
+                          if verify_individually(n) and not is_blacklisted(n)]
+            candidates = apply_mandatory_filters(candidates, all_selected)
+
+            if len(candidates) < hops:
+                if constraints.fallback_to_default and pool != "bgpx-default":
+                    candidates = get_nodes_in_domain_and_pool(domain, "bgpx-default")
+                    candidates = apply_mandatory_filters(candidates, all_selected)
+                    if len(candidates) < hops:
+                        return FAIL(ERR_POOL_INSUFFICIENT_NODES)
+                else:
+                    return FAIL(ERR_POOL_INSUFFICIENT_NODES)
+
+            selected = []
+            for _ in range(hops):
+                remaining = [n for n in candidates
+                             if n not in selected and n not in all_selected]
+                eligible = [n for n in remaining
+                            if diversity_ok(n, selected + all_selected)]
+                if not eligible:
+                    return FAIL(ERR_SEGMENT_CONSTRUCTION_FAILED)
+                node = weighted_random_select(
+                    eligible,
+                    score_fn=score_node_in_domain(domain)
+                )
+                selected.append(node)
+                all_selected.append(node)
+
+            segment_results.append(('segment', selected))
+            current_domain = domain
+
+    # Final cross-domain diversity check
+    if not check_cross_domain_diversity(all_selected):
+        return FAIL(ERR_SEGMENT_CONSTRUCTION_FAILED)
+
+    path_id = generate_path_id()
+    return (all_selected, segment_results, path_id)
+```
+
+---
+
+## 9. Node Scoring Function (Domain-Aware)
+
+```
+score(node, domain) = 0.30 × S_uptime(node)
+                    + 0.25 × S_latency(node, domain)
+                    + 0.20 × S_bandwidth(node)
+                    + 0.15 × S_reputation(node)
+                    + 0.10 × S_geo_plausibility(node, domain)
+```
+
+**S_latency(node, domain)**:
+```
+clearnet:    max(0, 1.0 - (node.latency_ms / 500.0))
+WiFi mesh:   max(0, 1.0 - (node.latency_ms / 100.0))
+LoRa:        max(0, 1.0 - (node.latency_ms / 5000.0))
+satellite:   0.5  (neutral — expected high latency)
+```
+
+**S_geo_plausibility(node, domain)**:
+```
+satellite nodes: 0.5 (exempt)
+mesh LoRa nodes: mesh-specific thresholds (100ms-5s expected)
+others:          RTT-based ratio vs expected region range
+```
+
+**Bridge node scoring** (specialized):
+```
+score_bridge(node, from_domain, to_domain) =
+    0.30 × min(uptime_in_domain(node, from_domain), uptime_in_domain(node, to_domain)) / 100.0
+    + 0.25 × max(0, 1.0 - (bridge.bridge_latency_ms / 2000.0))
+    + 0.20 × node.reputation_score / 100.0
+    + 0.15 × min(1.0, len(node.routing_domains) / 5.0)
+    + 0.10 × compute_geo_spread(node.routing_domains)
+```
+
+**Weighted random selection (MANDATORY — not deterministic)**:
+```python
+function weighted_random_select(candidates, score_fn):
+    scores = [(n, score_fn(n)) for n in candidates]
+    total = sum(s for _, s in scores)
+    if total == 0:
+        return random.choice(candidates)
+    r = random.uniform(0, total)
+    cumulative = 0
+    for node, s in scores:
+        cumulative += s
+        if r <= cumulative:
+            return node
+    return scores[-1][0]
+```
+
+---
+
+## 10. Cross-Domain Diversity Enforcement
+
+Diversity is enforced across the ENTIRE path — all segments and all domain bridge nodes combined:
+
+```python
+def check_cross_domain_diversity(all_path_nodes):
+
+    # ASN diversity: no two nodes in same ASN across entire path
+    asns = [n.asn for n in all_path_nodes]
+    if len(asns) != len(set(asns)):
+        return False
+
+    # Country diversity: no two nodes in same country
+    countries = [n.country for n in all_path_nodes]
+    if len(countries) != len(set(countries)):
+        return False
+
+    # Operator diversity: no two nodes with same operator_id
+    op_ids = [n.operator_id for n in all_path_nodes if n.operator_id]
+    if len(op_ids) != len(set(op_ids)):
+        return False
+
+    # Node uniqueness: no node appears twice
+    node_ids = [n.node_id for n in all_path_nodes]
+    if len(node_ids) != len(set(node_ids)):
+        return False
+
+    return True
+```
+
+Domain boundaries do NOT reset diversity counting. A node in ASN 12345 in the clearnet segment means no other node in ASN 12345 may appear in any mesh segment or bridge position of the same path.
+
+Default additional constraints (applied unless overridden):
+```python
+# At least 2 different regions across entire path
+assert len(set(n.region for n in all_path_nodes)) >= 2
+
+# All nodes minimum uptime
+assert all(n.uptime_pct >= 85.0 for n in all_path_nodes)
+```
+
+---
+
+## 11. path_id Generation
+
+```python
+path_id = CSPRNG.generate_bytes(8)
+while path_id == bytes(8):  # Never all-zeros
+    path_id = CSPRNG.generate_bytes(8)
+```
+
+path_id is included in every onion layer including DOMAIN_BRIDGE layers. The same value is used throughout the entire cross-domain path.
+
+---
+
+## 12. Mesh Island Path Construction
+
+Within a mesh island segment, path construction queries the unified DHT with domain filter:
+
+```python
+function get_nodes_in_domain_and_pool(domain, pool):
+    if domain.type == "mesh":
+        candidates = dht.find_nodes(
+            target = pool_id_or_random,
+            domain_filter = domain.id,
+            max_results = 50
+        )
+        return [n for n in candidates
+                if n.serves_domain(domain) and verify_individually(n)]
+    else:
+        return dht.find_nodes(target=pool_id_or_random, max_results=50)
+```
+
+---
+
+## 13. Double-Exit Architecture
+
+Double-exit works within a single domain or across domains:
+
+**Single-domain double-exit**:
+```
+[Entry + Relay, default pool] → [Exit Pool 1] → [Exit Pool 2] → Destination
+```
+
+**Cross-domain double-exit** (maximum isolation):
+```
+[clearnet relays] → [Bridge → mesh] → [mesh relays] → [Bridge → clearnet] → [clearnet exit]
+```
+
+The intermediate mesh segment acts as an opacity layer between the two clearnet segments.
+
+---
+
+## 14. Path Caching and Rebuild
+
+Default cache TTL: **10 minutes**. Cross-domain cache invalidation additional triggers:
+- Domain bridge node goes offline (KEEPALIVE timeout)
+- Mesh island becomes unreachable (all bridges offline)
+- DOMAIN_ADVERTISE record for required bridge pair expires
+- MESH_ISLAND_ADVERTISE record expires
+
+**Segment-level rebuild for cross-domain paths**:
+1. Identify which segment or bridge transition failed
+2. Attempt to rebuild only the failed segment/bridge
+3. If domain transition fails: rebuild all segments in affected portion
+4. If full rebuild fails: fail with ERR_NO_CROSS_DOMAIN_PATH
+
+---
+
+## 15. Offline Island Handling
+
+When a mesh island's bridge nodes are all offline:
+- Path construction to destinations within that island: FAIL with ERR_MESH_ISLAND_UNREACHABLE
+- If `store_and_forward = true` in path config: queue request for delivery when island reconnects
+- Client retries periodically (configurable interval, default 60 seconds)
+- When bridge reconnects: island advertisement published to unified DHT; path construction succeeds
+
+---
+
+## 16. Bootstrap Path
+
+When a client first joins with no DHT knowledge, same bootstrap procedure as before using well-known bootstrap nodes. For cross-domain capability: after populating DHT routing table, additionally prefetch DOMAIN_ADVERTISE records for commonly needed bridge pairs.
+
+---
+
+## 17. Complete Path Construction Entry Point
+
+```python
+function build_path(config):
+    if config.domain_segments:
+        # Cross-domain path
+        return build_cross_domain_path(config.domain_segments, config.constraints)
+    elif config.segments:
+        # Single-domain pool-based path (backward compatible)
+        return build_single_domain_path(config.segments, config.constraints)
+    else:
+        # Default: single-domain clearnet, 4 hops, default pool
+        return build_single_domain_path(
+            [{ pool = "bgpx-default", hops = 4, exit = true }],
+            config.constraints
+        )
+```
