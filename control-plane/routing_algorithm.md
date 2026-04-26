@@ -2,410 +2,380 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the complete routing algorithm used by BGP-X clients to select paths, score nodes, and make routing decisions.
-
 ---
 
 ## 1. Overview
 
-BGP-X routing is **client-driven source routing**. The client constructs the complete path before transmitting any data. No relay node participates in path selection decisions.
+BGP-X routing is **client-driven inter-protocol domain source routing**. The client constructs the complete cross-domain path before transmitting. The routing algorithm:
 
-This is fundamentally different from BGP (where ISP routers make per-hop routing decisions) and from Tor (where the client selects nodes but the directory authority influences which nodes are available). In BGP-X, the client:
+1. Determines domain sequence required
+2. Discovers bridge nodes for domain transitions
+3. Queries domain-filtered DHT for relay candidates per domain segment
+4. Filters candidates using mandatory constraints
+5. Scores candidates (domain-aware weighted function)
+6. Selects via weighted random sampling with cross-domain diversity enforcement
+7. Generates path_id
 
-1. Queries the DHT for available nodes
-2. Filters nodes using hard constraints
-3. Scores remaining nodes using a weighted function
-4. Selects nodes using weighted random sampling
-5. Verifies the assembled path meets diversity requirements
-6. Constructs onion-encrypted packets for the selected path
+**N-hop unlimited**: no maximum on total path hops, domain segment count, domain traversal count, or domain bridge transition count.
 
 ---
 
 ## 2. Node Database
 
-The routing algorithm operates on a local **node database** maintained by the client.
+```rust
+struct NodeDatabaseEntry {
+    node_id:                NodeId,
+    public_key:             Ed25519PublicKey,
+    roles:                  Vec<NodeRole>,
+    routing_domains:        Vec<RoutingDomainEntry>,
+    bridge_capable:         bool,
+    bridges:                Vec<DomainBridge>,
+    serves_domains:         Vec<DomainId>,
+    asn:                    u32,
+    country:                String,
+    region:                 Region,
+    operator_id:            Option<Ed25519PublicKey>,
+    exit_policy:            Option<ExitPolicy>,
+    exit_policy_version:    Option<u16>,
+    bandwidth_mbps:         f32,
+    latency_ms:             f32,
+    uptime_pct:             f32,
+    reputation_score:       f32,
+    geo_plausibility_score: f32,
+    last_seen:              Timestamp,
+    advertisement_expires:  Timestamp,
+    extensions:             ExtensionFlags,
+    pool_memberships:       Vec<PoolId>,
+    island_memberships:     Vec<String>,
+    pt_supported:           Vec<String>,
+    ech_capable:            bool,
+    is_gateway:             bool,
+    link_quality_profiles:  HashMap<TransportType, LinkQualityProfile>,
+    withdrawn:              bool,
+    blacklisted:            bool,
+    blacklist_reason:       Option<String>,
+    transport_types:        Vec<TransportType>,
+}
 
-### 2.1 Node database contents
-
-For each known node, the database stores:
-
-```
-{
-  node_id:            bytes[32]
-  public_key:         bytes[32]
-  roles:              set<string>
-  endpoints:          list<Endpoint>
-  asn:                uint32
-  country:            string
-  region:             string
-  operator_id:        bytes[32] | null
-  exit_policy:        ExitPolicy | null
-  bandwidth_mbps:     float
-  latency_ms:         float
-  uptime_pct:         float
-  reputation_score:   float  # 0.0–100.0, maintained by reputation system
-  last_seen:          timestamp
-  advertisement_expires: timestamp
-  extensions:         ExtensionFlags
-  blacklisted:        bool
-  blacklist_reason:   string | null
+struct DomainBridge {
+    from_domain:          DomainId,
+    to_domain:            DomainId,
+    bridge_latency_ms:    f32,
+    bridge_transport:     TransportType,
+    available:            bool,
 }
 ```
 
-### 2.2 Node database maintenance
-
-- Nodes are added to the database as their advertisements are retrieved from the DHT
-- Nodes are removed from the database when their advertisement expires AND they have not been seen within the past 2 hours
-- Blacklisted nodes remain in the database (with `blacklisted = true`) for 30 days for blacklist propagation purposes, then are removed
-- The database is persisted to disk (encrypted) across client restarts
-
-### 2.3 Database size limits
-
-Maximum node database size: **10,000 nodes**
-
-When the limit is reached, the least recently seen nodes are evicted first, subject to the constraint that at least 5 nodes from each region are retained if available.
+Maximum database size: 10,000 nodes. Eviction: least recently seen first. Withdrawn nodes: immediately removed from eligible pool; retained 7 days for propagation.
 
 ---
 
 ## 3. Filtering Stage
 
-Before scoring, the routing algorithm filters nodes to those eligible for use in the current path.
+### Mandatory Filters (All Nodes, All Domains)
 
-### 3.1 Mandatory filters (always applied)
-
-| Filter | Condition to pass |
+| Filter | Condition |
 |---|---|
 | Not blacklisted | `node.blacklisted == false` |
+| Not withdrawn | `node.withdrawn == false` |
 | Advertisement valid | `current_time < node.advertisement_expires` |
-| Signature valid | Advertisement signature verified (done at database insertion time) |
-| Role appropriate | Node's roles include the required role for this position in the path |
+| Signature valid | Verified at database insertion time |
+| Role appropriate | Node has required role for position in path |
 | Minimum uptime | `node.uptime_pct >= 85.0` |
-| No private endpoints | All endpoints are publicly routable addresses |
-| Not already in path | Node not already selected for this path |
+| Valid endpoints | Has reachable endpoint in required domain |
+| Not already in path | Not selected for this path construction |
 
-### 3.2 Version compatibility filter
+### Domain Membership Filter
 
+For segments requiring nodes in a specific routing domain:
+```python
+candidates = [n for n in candidates if required_domain_id in n.serves_domains]
 ```
-node.protocol_versions_min <= session_version <= node.protocol_versions_max
+
+### Bridge Capability Filter (Bridge Positions)
+
+```python
+candidates = [n for n in candidates
+              if n.bridge_capable
+              and has_bridge(n, from_domain, to_domain)
+              and get_bridge(n, from_domain, to_domain).available]
 ```
 
-Only nodes that support the client's selected protocol version are eligible.
+### ECH Capability Filter (Exit Segments)
 
-### 3.3 Exit policy filter (for exit nodes only)
+```python
+if segment_constraints.require_ech and is_exit_segment:
+    candidates = [n for n in candidates if n.ech_capable]
+```
 
-When selecting an exit node, the filter additionally requires:
+### Exit Policy Filter (Exit Segments)
 
-- `"exit"` in node.roles
-- `node.exit_policy` is not null
-- `node.exit_policy.allow_protocols` contains the required protocol
-- Destination port is in `node.exit_policy.allow_ports` (or `[0]` meaning all)
-- Destination address is not in `node.exit_policy.deny_destinations`
-- `node.exit_policy.logging_policy` satisfies client's logging policy requirement (if specified)
-- `node.exit_policy.jurisdiction` satisfies client's jurisdiction constraints (if specified)
+```python
+if is_exit_segment:
+    candidates = [n for n in candidates
+                  if "exit" in n.roles
+                  and n.exit_policy is not None
+                  and satisfies_exit_constraints(n, segment_constraints)]
+```
 
 ---
 
 ## 4. Scoring Function
 
-After filtering, each candidate node is assigned a score used for weighted random selection.
-
-### 4.1 Score components
-
 ```
-score(node) = w_uptime    × S_uptime(node)
-            + w_latency   × S_latency(node)
-            + w_bandwidth × S_bandwidth(node)
-            + w_reputation× S_reputation(node)
+score(node, domain) = 0.30 × S_uptime(node)
+                    + 0.25 × S_latency(node, domain)
+                    + 0.20 × S_bandwidth(node)
+                    + 0.15 × S_reputation(node)
+                    + 0.10 × S_geo_plausibility(node, domain)
 ```
 
-Default weights:
+### Component Functions
 
-| Component | Weight | Symbol |
-|---|---|---|
-| Uptime | 0.35 | w_uptime |
-| Latency | 0.30 | w_latency |
-| Bandwidth | 0.20 | w_bandwidth |
-| Reputation | 0.15 | w_reputation |
+```python
+def S_uptime(node):
+    return node.uptime_pct / 100.0
 
-Weights sum to 1.0.
+def S_latency(node, domain):
+    if domain.type == "clearnet":
+        return max(0, 1.0 - (node.latency_ms / 500.0))
+    elif domain.type == "mesh":
+        if node.has_lora_transport_for_domain(domain):
+            return max(0, 1.0 - (node.latency_ms / 5000.0))  # LoRa: wide range
+        else:
+            return max(0, 1.0 - (node.latency_ms / 100.0))   # WiFi mesh: tight
+    elif domain.type == "satellite":
+        return 0.5  # Neutral — satellite latency expected and not differentiating
+    return max(0, 1.0 - (node.latency_ms / 500.0))  # Default
 
-### 4.2 Component functions
+def S_bandwidth(node):
+    return min(1.0, node.bandwidth_mbps / 1000.0)
 
-#### Uptime score
+def S_reputation(node):
+    return node.reputation_score / 100.0
 
-```
-S_uptime(node) = node.uptime_pct / 100.0
-```
-
-Range: [0.0, 1.0]
-
-#### Latency score
-
-Lower latency is better. The score is an inverse function, normalized to the range of observed latencies:
-
-```
-S_latency(node) = 1.0 - (node.latency_ms / MAX_LATENCY_MS)
-MAX_LATENCY_MS = 500.0
-```
-
-Nodes with latency > 500ms receive S_latency = 0.0 and are effectively excluded.
-
-#### Bandwidth score
-
-```
-S_bandwidth(node) = min(node.bandwidth_mbps, MAX_SCORE_BANDWIDTH) / MAX_SCORE_BANDWIDTH
-MAX_SCORE_BANDWIDTH = 1000.0
+def S_geo_plausibility(node, domain):
+    if domain.type == "satellite":
+        return 0.5  # Exempt
+    if node.rtt_measurement_count < 5:
+        return 0.5  # Insufficient measurements
+    return node.geo_plausibility_score  # Pre-computed by reputation system
 ```
 
-Bandwidth above 1000 Mbps does not improve the score further (diminishing returns for relay purposes).
-
-#### Reputation score
-
-```
-S_reputation(node) = node.reputation_score / 100.0
-```
-
-The reputation score is maintained by the reputation system (see `/control-plane/reputation_system.md`). Range: [0.0, 100.0].
-
-### 4.3 Weighted random selection
-
-Nodes are not selected deterministically by highest score. Instead, **weighted random sampling without replacement** is used:
-
-```
-function weighted_random_select(candidates):
-    total_weight = sum(score(n) for n in candidates)
-    r = random_float(0.0, total_weight)
-    cumulative = 0.0
-    for node in candidates:
-        cumulative += score(node)
-        if r <= cumulative:
-            return node
-```
-
-This ensures that high-scoring nodes are more likely to be selected, but low-scoring nodes still have a non-zero probability. This prevents deterministic path selection that would make traffic patterns predictable and prevent any node from dominating the network simply by manipulating performance metrics.
-
----
-
-## 5. Diversity Enforcement
-
-After scoring-based selection, the assembled path is verified against diversity constraints. If any constraint is violated, the selection is retried.
-
-### 5.1 ASN diversity check
-
-```
-asns = [node.asn for node in path]
-assert len(asns) == len(set(asns))
-# All ASNs must be unique
-```
-
-### 5.2 Country diversity check
-
-```
-countries = [node.country for node in path]
-assert len(countries) == len(set(countries))
-# All countries must be unique
-```
-
-### 5.3 Operator diversity check
-
-```
-operator_ids = [node.operator_id for node in path if node.operator_id is not None]
-assert len(operator_ids) == len(set(operator_ids))
-# All operator IDs must be unique
-```
-
-### 5.4 Region diversity check (default constraint)
-
-```
-regions = set(node.region for node in path)
-assert len(regions) >= 2
-# At least 2 different regions represented
-```
-
-### 5.5 Constraint violation handling
-
-If any mandatory diversity constraint is violated:
-
-1. Identify which constraint failed and which nodes are in conflict
-2. Remove one of the conflicting nodes from consideration for this path (randomly chosen between the two conflicts)
-3. Retry selection for that position
-4. If no valid node can be found after 10 retries, attempt with a reduced path length (if length > minimum)
-5. If minimum path length constraints cannot be met, fail path construction
-
----
-
-## 6. Path Length Selection
-
-Default path length: **4 hops**
-
-### 6.1 Automatic path length adjustment
-
-The client may automatically adjust path length based on:
-
-| Condition | Adjustment |
-|---|---|
-| Network has < 50 nodes in database | Reduce to 3 hops (minimum) |
-| Application requests high-security mode | Increase to 5–7 hops |
-| Path latency exceeds application budget | Reduce by 1 hop (minimum 3) |
-| Cover traffic enabled | No length adjustment needed |
-
-### 6.2 Application-specified path length
-
-Applications using the BGP-X SDK can specify a minimum and maximum path length:
-
-```rust
-PathConfig {
-    min_hops: 3,
-    max_hops: 7,
-    preferred_hops: 4,
-    // ...
-}
-```
-
-The routing algorithm selects the preferred_hops length if possible, falls back to any value in [min_hops, max_hops] if necessary.
-
----
-
-## 7. Multi-Path Routing
-
-For high-throughput or high-reliability applications, BGP-X supports building multiple paths simultaneously.
-
-### 7.1 Path isolation
-
-When building multiple paths, the routing algorithm enforces cross-path isolation:
-
-- No node appears in more than one path simultaneously
-- No operator appears in more than one path simultaneously
-- No ASN appears in more than one path simultaneously
-
-This prevents an adversary who controls one node from appearing in multiple paths used by the same client.
-
-### 7.2 Load distribution
-
-Streams are distributed across available paths using a round-robin assignment. Sensitive streams MAY be pinned to a specific path.
-
----
-
-## 8. Path Rebuilding
-
-A path MUST be rebuilt when:
-
-- Any node in the path goes offline (KEEPALIVE timeout)
-- Any node in the path is blacklisted
-- The path's age exceeds the maximum reuse window (default: 10 minutes)
-- The application explicitly requests a new path
-
-A path SHOULD be rebuilt when:
-
-- Measured path latency exceeds 3× the initial measured latency
-- Packet loss exceeds 5% sustained over 30 seconds
-
-### 8.1 Seamless rebuilding
-
-The client SHOULD pre-build a replacement path before the current path's TTL expires. When the current path is retired, the replacement is immediately available.
-
-### 8.2 Stream migration
-
-When a path is rebuilt while streams are in flight:
-
-- In-flight data on the old path is allowed to drain (up to 10 seconds)
-- New streams are immediately opened on the new path
-- Existing streams are migrated to the new path if they are still active after draining
-
----
-
-## 9. Return Path Routing
-
-For request-response traffic (HTTP, API calls, etc.), the return path from the exit node back to the client is the reverse of the forward path.
-
-For long-lived bidirectional sessions, a separate return path MAY be constructed using different nodes. This reduces correlation between inbound and outbound traffic patterns.
-
----
-
-## 10. Routing Algorithm Pseudocode (Complete)
-
-```
-function build_path(destination, config):
-
-    # Fetch candidate nodes
-    candidates = node_database.get_valid_nodes()
-
-    # Determine path length
-    n_hops = config.preferred_hops or DEFAULT_PATH_LENGTH
-
-    max_attempts = 20
-    for attempt in range(max_attempts):
-
-        # Select entry node
-        entry_candidates = filter_by_role(candidates, "entry")
-        entry_candidates = apply_mandatory_filters(entry_candidates)
-        if len(entry_candidates) == 0:
-            raise PathConstructionError("No eligible entry nodes")
-        entry = weighted_random_select(entry_candidates)
-
-        # Select relay nodes
-        relays = []
-        used = {entry}
-        relay_candidates = filter_by_role(candidates, "relay")
-        relay_candidates = apply_mandatory_filters(relay_candidates)
-
-        success = true
-        for i in range(n_hops - 2):
-            eligible = [n for n in relay_candidates
-                        if n not in used
-                        and diversity_compatible(n, list(used), config)]
-            if len(eligible) == 0:
-                success = false
-                break
-            relay = weighted_random_select(eligible)
-            relays.append(relay)
-            used.add(relay)
-
-        if not success:
-            continue  # retry
-
-        # Select exit node
-        exit_candidates = filter_by_role(candidates, "exit")
-        exit_candidates = apply_mandatory_filters(exit_candidates)
-        exit_candidates = apply_exit_policy_filter(exit_candidates, destination, config)
-        exit_candidates = [n for n in exit_candidates
-                           if n not in used
-                           and diversity_compatible(n, list(used), config)]
-
-        if len(exit_candidates) == 0:
-            continue  # retry
-
-        exit_node = weighted_random_select(exit_candidates)
-
-        # Assemble path
-        path = [entry] + relays + [exit_node]
-
-        # Final diversity check (belt and suspenders)
-        if not check_all_diversity_constraints(path, config):
-            continue  # retry
-
-        return path
-
-    raise PathConstructionError(
-        "Could not construct path satisfying all constraints after max_attempts"
+### Bridge Node Scoring (Specialized)
+
+```python
+def score_bridge_node(node, from_domain, to_domain):
+    bridge = get_bridge_record(node, from_domain, to_domain)
+    if not bridge or not bridge.available:
+        return 0.0
+
+    uptime_score = min(
+        uptime_in_domain(node, from_domain),
+        uptime_in_domain(node, to_domain)
+    ) / 100.0
+
+    latency_score = max(0, 1.0 - (bridge.bridge_latency_ms / 2000.0))
+    rep_score = node.reputation_score / 100.0
+    domain_diversity = min(1.0, len(node.routing_domains) / 5.0)
+    geo_coverage = compute_geo_spread(node.routing_domains)
+
+    return (
+        0.30 * uptime_score +
+        0.25 * latency_score +
+        0.20 * rep_score +
+        0.15 * domain_diversity +
+        0.10 * geo_coverage
     )
 ```
 
 ---
 
-## 11. Routing Metrics and Observability
+## 5. Cross-Domain Diversity Enforcement
 
-The routing algorithm SHOULD expose the following metrics for operational monitoring (no user-identifiable data):
+Applied to the ENTIRE path (all segments and bridge nodes combined):
+
+```python
+def check_cross_domain_diversity(all_path_nodes):
+    asns = [n.asn for n in all_path_nodes]
+    if len(asns) != len(set(asns)):
+        return False
+
+    countries = [n.country for n in all_path_nodes]
+    if len(countries) != len(set(countries)):
+        return False
+
+    op_ids = [n.operator_id for n in all_path_nodes if n.operator_id]
+    if len(op_ids) != len(set(op_ids)):
+        return False
+
+    node_ids = [n.node_id for n in all_path_nodes]
+    if len(node_ids) != len(set(node_ids)):
+        return False
+
+    return True
+```
+
+Domain boundaries do NOT reset diversity counting. Bridge nodes participate in diversity constraints equally with relay nodes.
+
+Default additional constraints (applied unless overridden):
+```python
+assert len(set(n.region for n in all_path_nodes)) >= 2  # At least 2 different regions
+assert all(n.uptime_pct >= 85.0 for n in all_path_nodes)
+```
+
+---
+
+## 6. Path Length Selection
+
+Defaults (not enforced limits):
+
+| Path Type | Default Hops |
+|---|---|
+| Single-domain clearnet | 4 |
+| Cross-domain (2 segments + 1 bridge) | 7 |
+| Cross-domain (3 segments + 2 bridges) | 10 |
+| High-security application-specified | Any |
+
+No protocol maximum enforced. Daemon logs a soft informational message for paths exceeding 15 hops.
+
+---
+
+## 7. Weighted Random Selection
+
+```python
+def weighted_random_select(candidates, score_fn):
+    scores = [(n, score_fn(n)) for n in candidates]
+    total = sum(s for _, s in scores)
+    if total == 0:
+        return random.choice(candidates)
+    r = random.uniform(0, total)
+    cumulative = 0
+    for node, s in scores:
+        cumulative += s
+        if r <= cumulative:
+            return node
+    return scores[-1][0]
+```
+
+Nodes are NOT selected deterministically by highest score. Weighted random ensures high-scoring nodes are proportionally likely, but low-scoring eligible nodes have non-zero probability.
+
+---
+
+## 8. Full Cross-Domain Construction
+
+```python
+def build_path(config):
+    if config.domain_segments:
+        return build_cross_domain_path(config.domain_segments, config.constraints)
+    elif config.segments:
+        return build_single_domain_path(config.segments, config.constraints)
+    else:
+        return build_single_domain_path(
+            [{ pool = "bgpx-default", hops = 4, exit = true }],
+            config.constraints
+        )
+
+def build_cross_domain_path(domain_segments, constraints):
+    all_selected = []
+    segment_results = []
+
+    for i, seg in enumerate(domain_segments):
+        if seg.type == "bridge":
+            from_domain = get_previous_domain(domain_segments, i)
+            to_domain = get_next_domain(domain_segments, i)
+
+            bridge_candidates = discover_domain_bridges(from_domain, to_domain)
+            if bridge_candidates is FAIL:
+                if constraints.fallback_any_bridge:
+                    bridge_candidates = discover_any_bridge_to(to_domain)
+                if bridge_candidates is FAIL:
+                    return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+            eligible = [n for n in bridge_candidates
+                        if n not in all_selected and diversity_ok(n, all_selected)]
+            if not eligible:
+                return FAIL(ERR_NO_CROSS_DOMAIN_PATH)
+
+            node = weighted_random_select(eligible, score_fn=score_bridge_node(from_domain, to_domain))
+            all_selected.append(node)
+            segment_results.append(('bridge', [node]))
+
+        elif seg.type == "segment":
+            domain = seg.domain
+            pool = seg.pool or "bgpx-default"
+            hops = seg.hops
+
+            candidates = get_nodes_in_domain_and_pool(domain, pool)
+            candidates = [n for n in candidates if verify_individually(n) and not is_blacklisted(n)]
+            candidates = apply_mandatory_filters(candidates, all_selected)
+
+            if len(candidates) < hops:
+                if constraints.fallback_to_default and pool != "bgpx-default":
+                    candidates = get_nodes_in_domain_and_pool(domain, "bgpx-default")
+                    candidates = apply_mandatory_filters(candidates, all_selected)
+                    if len(candidates) < hops:
+                        return FAIL(ERR_POOL_INSUFFICIENT_NODES)
+                else:
+                    return FAIL(ERR_POOL_INSUFFICIENT_NODES)
+
+            selected = []
+            for _ in range(hops):
+                remaining = [n for n in candidates if n not in selected and n not in all_selected]
+                eligible = [n for n in remaining if diversity_ok(n, selected + all_selected)]
+                if not eligible:
+                    return FAIL(ERR_SEGMENT_CONSTRUCTION_FAILED)
+                node = weighted_random_select(eligible, score_fn=score_node_in_domain(domain))
+                selected.append(node)
+                all_selected.append(node)
+            segment_results.append(('segment', selected))
+
+    if not check_cross_domain_diversity(all_selected):
+        return FAIL(ERR_SEGMENT_CONSTRUCTION_FAILED)
+
+    path_id = generate_path_id()
+    return (all_selected, segment_results, path_id)
+```
+
+---
+
+## 9. Path Caching and Rebuild
+
+Default cache TTL: 10 minutes.
+
+Additional cross-domain cache invalidation:
+- Domain bridge node goes offline (KEEPALIVE timeout)
+- Mesh island becomes unreachable (all bridges offline)
+- DOMAIN_ADVERTISE record for required bridge pair expires
+- MESH_ISLAND_ADVERTISE record expires
+- Pool curator key rotation affecting any node in any domain segment
+
+Bridge-level discovery cache: 5-minute TTL (shorter than path cache — bridge availability changes more frequently).
+
+**Segment-level rebuild for cross-domain**:
+1. Identify failed segment or bridge transition
+2. Attempt to rebuild only the failed part
+3. If bridge transition fails: attempt alternative bridge node
+4. If no alternative: rebuild affected portion
+5. If full path fails: FAIL with ERR_NO_CROSS_DOMAIN_PATH
+
+---
+
+## 10. Metrics
 
 | Metric | Description |
 |---|---|
-| `path_construction_attempts` | Total path construction attempts |
-| `path_construction_successes` | Successful path constructions |
-| `path_construction_failures` | Failed path constructions (with reason) |
-| `path_construction_latency_ms` | Time to construct a path |
-| `node_database_size` | Current number of nodes in database |
-| `node_database_by_region` | Node count per region |
-| `path_age_at_rebuild_seconds` | Age of path when it was rebuilt |
-| `diversity_constraint_violations` | Constraint violations by type |
+| path_construction_attempts | Total attempts |
+| path_construction_successes | Successes |
+| path_construction_failures | Failures (with reason breakdown) |
+| path_construction_latency_ms | Time to construct |
+| cross_domain_constructions | Paths using domain_segments |
+| domain_bridge_selections | Bridge node selection attempts |
+| domain_bridge_failures | Bridge node selection failures |
+| node_database_size | Current entries |
+| node_database_by_region | Count per region |
+| bridge_nodes_in_database | Count of bridge-capable nodes |
+| island_advertisements_cached | Count of mesh island advertisement cache entries |
+| pool_fallbacks | Count of pool insufficient → default fallback |
 
-These metrics MUST NOT include any information about which nodes were selected, which destinations were accessed, or any session identifiers.
+No node identifiers, path identifiers, or client data in metrics.
