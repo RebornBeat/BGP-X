@@ -2,389 +2,213 @@
 
 **Version**: 0.1.0-draft
 
-This document provides a complete specification of the encryption scheme used in BGP-X — covering the onion layering construction, the cryptographic primitives for each layer, nonce construction, key derivation, and implementation requirements.
+---
+
+## 1. Cross-Domain Cryptographic Properties
+
+### Domain-Agnostic Crypto
+
+BGP-X uses identical cryptographic operations regardless of which routing domain a session is in:
+
+- Same ChaCha20-Poly1305 for all onion layers in all domains
+- Same X25519 key exchange in all domains
+- Same HKDF-SHA256 key derivation in all domains (identical salts and info strings)
+- Same HANDSHAKE_INIT / HANDSHAKE_RESP / HANDSHAKE_DONE format in all domains
+- Same nonce construction in all domains
+
+There is NO "mesh crypto" or "clearnet crypto" — one cryptographic suite serves all domains.
+
+### No Re-Encryption at Domain Boundaries
+
+When a packet crosses a domain boundary (DOMAIN_BRIDGE hop), the remaining onion payload is forwarded WITHOUT re-encryption by the bridge node. The bridge node decrypts only its own layer, then forwards the still-encrypted inner layers via the target domain's transport.
+
+This is correct and secure:
+- Inner layers are already encrypted for subsequent hop nodes in the target domain
+- Bridge node cannot decrypt inner layers (it doesn't have those session keys)
+- Clearnet observers see an encrypted UDP datagram (cannot see inner layers)
+- Mesh radio observers see an encrypted radio frame (same protection)
+
+### COVER Traffic Across Domains
+
+COVER packets (0x11) use session_key identically in all routing domains. Externally indistinguishable from RELAY in clearnet, mesh, and satellite domains.
 
 ---
 
-## 1. Overview
+## 2. Cryptographic Primitive (Unchanged)
 
-BGP-X uses **layered symmetric encryption** (onion encryption) to ensure that no relay node can decrypt more than its own layer of a packet. Each layer is independently encrypted using a key shared only between the client and that specific hop.
-
-The encryption scheme must satisfy:
-
-- **Unlinkability**: A relay node cannot correlate an incoming packet with an outgoing packet based on ciphertext content
-- **Unforgeability**: A relay node cannot inject or modify packets without detection
-- **Forward secrecy**: Compromise of long-term node keys does not expose past session traffic
-- **Efficiency**: Encryption and decryption must be fast enough for wire-speed operation
+**ChaCha20-Poly1305** (RFC 8439). Key: 32 bytes. Nonce: 12 bytes. Tag: 16 bytes. No separate cover_key.
 
 ---
 
-## 2. Cryptographic Primitive: ChaCha20-Poly1305
+## 3. Key Hierarchy (Unchanged, Domain-Agnostic)
 
-BGP-X uses **ChaCha20-Poly1305** (RFC 8439) as the AEAD (Authenticated Encryption with Associated Data) cipher for all onion layers.
+```
+session_key     = HKDF-SHA256(IKM=dh1||dh2, salt=BLAKE3("bgpx-session-key-v1"), info=session_id||node_id, L=32)
+keepalive_key   = HKDF-SHA256(IKM=dh1||dh2, salt=BLAKE3("bgpx-keepalive-key-v1"), info=session_id||node_id, L=32)
+init_key        = HKDF-SHA256(IKM=dh1, salt=BLAKE3("bgpx-init-key-v1"), info="handshake-init", L=32)
+resp_key        = HKDF-SHA256(IKM=dh1 XOR dh2, salt=BLAKE3("bgpx-resp-key-v1"), info=session_id||"handshake-resp", L=32)
+```
 
-### 2.1 Why ChaCha20-Poly1305
-
-| Property | Detail |
-|---|---|
-| Performance without AES-NI | ChaCha20 is faster than AES-GCM on hardware without AES hardware acceleration (common in embedded/router hardware targeted by BGP-X firmware) |
-| Performance with AES-NI | Slightly slower than AES-GCM on x86 with AES-NI, but acceptably so |
-| Side-channel resistance | ChaCha20 is designed to be constant-time; no S-box lookups that could leak via cache timing |
-| Key size | 256-bit key |
-| Nonce size | 96-bit (12-byte) nonce |
-| Tag size | 128-bit (16-byte) Poly1305 authentication tag |
-| Authentication | Poly1305 provides full AEAD — ciphertext integrity is verified before decryption |
-
-### 2.2 Security parameters
-
-- **Key**: 32 bytes (256 bits), unique per (session, hop)
-- **Nonce**: 12 bytes, constructed from sequence number (see Section 4)
-- **Tag**: 16 bytes, appended to ciphertext
-- **AAD**: 32-byte BGP-X common header
+No cover_key. COVER uses session_key. Applies in all routing domains.
 
 ---
 
-## 3. Key Hierarchy
-
-BGP-X uses a hierarchy of keys derived from the handshake:
+## 4. Nonce Construction (Unchanged, Domain-Agnostic)
 
 ```
-Handshake Key Material
-    │
-    ├── Session Key (32 bytes)
-    │       └── Used for: onion layer encryption at this hop
-    │
-    ├── KeepalIve Key (32 bytes)
-    │       └── Used for: KEEPALIVE message authentication
-    │
-    └── Cover Key (32 bytes)
-            └── Used for: COVER message padding generation
+nonce = 0x00000000 || sequence_number_big_endian_8_bytes  (12 bytes)
 ```
 
-All keys are derived from the handshake's shared secret using HKDF-SHA256 with distinct info strings, preventing key reuse across purposes.
+Two independent sequence number spaces per session (inbound/outbound). No (key, nonce) pair is ever reused. Domain-agnostic — same mechanism in clearnet, mesh, and satellite sessions.
 
-### 3.1 Session key derivation (recap from handshake spec)
+---
 
-```
-input_key_material = X25519(client_ephemeral, node_static) || X25519(client_ephemeral, node_ephemeral)
+## 5. Onion Construction (Cross-Domain)
 
-session_key = HKDF-SHA256(
-    IKM  = input_key_material,
-    salt = BLAKE3("bgpx-session-key-v1"),
-    info = session_id || node_id,
-    L    = 32
-)
-```
+For a cross-domain path, the client constructs onion layers for ALL hops including domain bridge hops. The construction algorithm is unchanged — one layer per hop, innermost to outermost.
 
-### 3.2 Auxiliary key derivation
+DOMAIN_BRIDGE hops are constructed identically to RELAY hops at the crypto level. The only differences are the `hop_type` value (0x06) and the `next_hop` encoding (domain_id + bridge_node_id).
 
-```
-keepalive_key = HKDF-SHA256(
-    IKM  = input_key_material,
-    salt = BLAKE3("bgpx-keepalive-key-v1"),
-    info = session_id || node_id,
-    L    = 32
+```python
+# Example: clearnet relay(1) → relay(2) → bridge → mesh relay(1) → mesh relay(2) → service
+# 5 layers
+
+layer_5 = construct_layer(
+    hop_type = DELIVERY,
+    next_hop = encode_service(service_id),
+    path_id  = path_id,
+    key      = session_keys[4],
+    payload  = application_data,
+    sequence = seq
 )
 
-cover_key = HKDF-SHA256(
-    IKM  = input_key_material,
-    salt = BLAKE3("bgpx-cover-key-v1"),
-    info = session_id || node_id,
-    L    = 32
+layer_4 = construct_layer(
+    hop_type = MESH_RELAY,
+    next_hop = encode_mesh_node(mesh_relay_2),
+    path_id  = path_id,
+    key      = session_keys[3],
+    payload  = pad_to_size_class(layer_5),
+    sequence = seq
 )
+
+layer_3 = construct_layer(
+    hop_type = DOMAIN_BRIDGE,
+    next_hop = encode_domain_bridge(mesh_island_domain_id, bridge_node_id),
+    path_id  = path_id,
+    key      = session_keys[2],   # bridge node's session key
+    payload  = pad_to_size_class(layer_4),
+    sequence = seq
+)
+
+layer_2 = construct_layer(
+    hop_type = RELAY,
+    next_hop = encode_clearnet_node(relay_2),
+    path_id  = path_id,
+    key      = session_keys[1],
+    payload  = pad_to_size_class(layer_3),
+    sequence = seq
+)
+
+outermost = construct_layer(
+    hop_type = RELAY,
+    next_hop = encode_clearnet_node(relay_1),
+    path_id  = path_id,
+    key      = session_keys[0],
+    payload  = pad_to_size_class(layer_2),
+    sequence = seq
+)
+
+# Send outermost to relay_1 via clearnet UDP
 ```
+
+The bridge node's session key was established via the clearnet UDP endpoint. The bridge node decrypts layer_3, reads the DOMAIN_BRIDGE instruction, and forwards layer_4 (already encrypted for mesh hops) via its mesh radio. It does NOT re-encrypt layer_4.
 
 ---
 
-## 4. Nonce Construction
+## 6. Return Path Architecture (Cross-Domain)
 
-ChaCha20-Poly1305 requires a 12-byte nonce that MUST be unique per (key, message) pair.
-
-BGP-X constructs nonces deterministically from the packet sequence number:
-
+**Cross-domain return**:
 ```
-nonce = [0x00, 0x00, 0x00, 0x00] || sequence_number_as_8_bytes_big_endian
+Mesh service encrypts response with K_service (client's session key for that hop)
+         │
+Mesh relay 2 → path_id lookup → M1_mesh_addr → forward blob (opaque, no decrypt)
+         │
+Mesh relay 1 → path_id lookup → B1_mesh_addr → forward blob (opaque, no decrypt)
+         │
+Bridge node B1 → cross-domain path_id lookup → R1_clearnet_addr
+  → forward blob via clearnet UDP (opaque, no decrypt)
+         │
+Clearnet relay 1 → path_id lookup → E1_addr (opaque)
+         │
+Entry E1 → path_id lookup → client_addr (opaque)
+         │
+Client decrypts with K_service → receives response
 ```
 
-The first 4 bytes are always zero. The last 8 bytes are the 64-bit packet sequence number in big-endian format.
-
-### 4.1 Nonce uniqueness guarantee
-
-Since each session uses a unique session key, and sequence numbers within a session are strictly monotonically increasing:
-
-- No two packets in the same session will have the same sequence number
-- No two packets with the same sequence number can use the same key (different sessions = different keys)
-- Nonce uniqueness is guaranteed across all BGP-X packets for a given key
-
-### 4.2 Nonce reuse prevention
-
-Nonce reuse with the same key catastrophically breaks ChaCha20-Poly1305 security (an attacker can recover the keystream). BGP-X prevents nonce reuse by:
-
-- Using the sequence number as a nonce — sequence numbers are strictly increasing
-- The session table tracks the maximum outbound sequence number
-- Session keys are never reused across sessions (fresh handshake = fresh keys)
-- On crash recovery, sessions are NOT resumed (new handshake required) to avoid sequence number ambiguity
+Only the service and the client can decrypt the response. Bridge nodes and all intermediate relays are opaque forwarders for return traffic in both directions (forward and return), both within and across domains.
 
 ---
 
-## 5. Onion Layer Construction (Client Side)
+## 7. Session Re-Handshake (Unchanged, Domain-Agnostic)
 
-The client constructs the full onion packet before transmitting any data. This is a layered encryption process, working from the innermost (exit) layer outward to the outermost (entry) layer.
-
-### 5.1 Input
-
-```
-path         = [entry_node, relay_1, ..., relay_n, exit_node]
-session_keys = [key_entry, key_relay_1, ..., key_relay_n, key_exit]
-payload      = application data (plaintext)
-destination  = clearnet address or BGP-X ServiceID
-sequence     = current outbound sequence number
-session_id   = 16-byte session identifier
-```
-
-### 5.2 Construction algorithm
-
-```
-function construct_onion_packet(path, session_keys, payload, destination, sequence, session_id):
-
-    N = len(path)
-
-    # === Step 1: Build innermost layer (exit node) ===
-    inner_plaintext = LayerHeader {
-        hop_type:  determine_exit_hop_type(destination),
-        next_hop:  encode_destination(destination),
-        flags:     0x0000,
-        stream_id: current_stream_id,
-        reserved:  0x0000
-    } || payload
-
-    inner_plaintext = pad_to_size_class(inner_plaintext)
-
-    inner_header = CommonHeader {
-        version:         0x01,
-        msg_type:        0x01,
-        reserved:        0x0000,
-        session_id:      session_id,
-        sequence_number: sequence,
-        payload_length:  len(inner_plaintext) + 16  // +16 for Poly1305 tag
-    }
-
-    inner_ciphertext = chacha20_poly1305_encrypt(
-        key   = session_keys[N-1],
-        nonce = construct_nonce(sequence),
-        aad   = inner_header.serialize(),
-        pt    = inner_plaintext
-    )
-
-    current_ciphertext = inner_ciphertext
-
-    # === Step 2: Wrap each subsequent layer from exit-1 toward entry ===
-    for i in range(N-2, -1, -1):
-
-        node = path[i]
-        key  = session_keys[i]
-
-        layer_plaintext = LayerHeader {
-            hop_type:  0x01,  // RELAY
-            next_hop:  encode_bgpx_node(path[i+1]),
-            flags:     0x0000,
-            stream_id: current_stream_id,
-            reserved:  0x0000
-        } || current_ciphertext
-
-        layer_plaintext = pad_to_size_class(layer_plaintext)
-
-        layer_header = CommonHeader {
-            version:         0x01,
-            msg_type:        0x01,
-            reserved:        0x0000,
-            session_id:      session_id,
-            sequence_number: sequence,
-            payload_length:  len(layer_plaintext) + 16
-        }
-
-        layer_ciphertext = chacha20_poly1305_encrypt(
-            key   = key,
-            nonce = construct_nonce(sequence),
-            aad   = layer_header.serialize(),
-            pt    = layer_plaintext
-        )
-
-        current_ciphertext = layer_ciphertext
-
-    return current_ciphertext  # This is the outermost layer, sent to entry node
-```
-
-### 5.3 Size class padding
-
-Before encrypting each layer, the plaintext is padded to the nearest size class:
-
-| Size Class | Threshold |
-|---|---|
-| 256 bytes | plaintext <= 224 bytes (after padding, reaches 256 before tag) |
-| 512 bytes | plaintext <= 480 bytes |
-| 1024 bytes | plaintext <= 992 bytes |
-| 1248 bytes (max) | all larger plaintexts |
-
-Padding is random bytes appended to the plaintext. The padding length is encoded in the last 2 bytes of the padded block so the receiver can strip it.
-
-All padded plaintexts have the structure:
-
-```
-[original content][random padding bytes][padding_length: uint16]
-```
+24-hour re-handshake generates fresh keys. Same procedure for clearnet and mesh sessions. Re-handshake for a mesh session follows the same relay chain as initial establishment.
 
 ---
 
-## 6. Onion Layer Decryption (Relay Node Side)
+## 8. ECH at Exit Nodes (Unchanged)
 
-Each relay node decrypts exactly one layer of the onion.
-
-```
-function decrypt_onion_layer(session_key, header, ciphertext, sequence):
-
-    # Verify sequence number (replay protection)
-    if not check_sequence(sequence):
-        return DROP
-
-    # Construct nonce
-    nonce = construct_nonce(sequence)
-
-    # Decrypt
-    plaintext = chacha20_poly1305_decrypt(
-        key        = session_key,
-        nonce      = nonce,
-        aad        = header.serialize(),
-        ciphertext = ciphertext
-    )
-
-    if plaintext is None:
-        return DROP  # Authentication failure
-
-    # Strip padding
-    padding_length = uint16_from_bytes(plaintext[-2:])
-    if padding_length > len(plaintext) - 2:
-        return DROP  # Invalid padding length
-    plaintext = plaintext[:len(plaintext) - 2 - padding_length]
-
-    # Parse layer header
-    layer = parse_layer_header(plaintext)
-    if layer is None:
-        return DROP
-
-    return layer
-```
+ECH is a TLS-layer mechanism at clearnet exit nodes. Applies when the exit is a clearnet exit regardless of what domains the path traversed before reaching the exit. If the final destination is a mesh island service, ECH is not applicable.
 
 ---
 
-## 7. Encryption at the Gateway (Exit Node)
-
-The exit node decrypts the final onion layer and receives the plaintext application data. At this point, the exit node has:
-
-- The destination address (clearnet IP/domain or BGP-X ServiceID)
-- The plaintext application payload (e.g., HTTP request bytes)
-
-The exit node forwards this plaintext to the destination over the public internet. If the destination uses HTTPS (strongly recommended), the application data was already encrypted by TLS before being wrapped in BGP-X onion layers, providing defense in depth:
+## 9. Padding and Size Normalization (Unchanged, Domain-Agnostic)
 
 ```
-[TLS-encrypted application data]
-    wrapped in
-[BGP-X onion layer N (exit)]
-    wrapped in
-[BGP-X onion layer N-1 (relay)]
-    ...
-    wrapped in
-[BGP-X onion layer 1 (entry)]
+Size classes: 256, 512, 1024, 1280 bytes (total UDP payload)
+COVER MUST use same size class distribution as RELAY on same session
+Applies in all routing domains
 ```
 
-The exit node strips all BGP-X layers but cannot read the TLS-encrypted content.
+For mesh transports with MTU below 256 bytes: MESH_FRAGMENT handles fragmentation at transport layer below the BGP-X crypto layer. Padding and size classes are defined for the pre-fragmentation packet.
 
 ---
 
-## 8. Return Path Encryption
+## 10. Zeroization Ordering (MANDATORY, Unchanged)
 
-Responses from the destination travel back through the path in reverse.
+```
+After dh2 computed:    client_ephemeral_priv → ZEROIZE
+After session_key:     dh1, dh2 → ZEROIZE
+After handshake done:  init_key, resp_key, node_ephemeral_priv → ZEROIZE
+Session closed:        session_key, keepalive_key → ZEROIZE
+```
 
-### 8.1 Response forwarding by exit node
-
-When the exit node receives a response from the destination:
-
-1. It does NOT re-encrypt with onion layers (it does not have the client's keys for the other nodes)
-2. Instead, it forwards the response back over the established return session to the previous relay
-
-Return sessions are bidirectional — the session key established during the handshake is used for both directions (with separate sequence number spaces for inbound and outbound).
-
-### 8.2 Inbound vs outbound sequence numbers
-
-Each session maintains two sequence number spaces:
-
-- **Outbound**: Sequence numbers for packets sent by this node to the next hop
-- **Inbound**: Sequence numbers for packets received from the previous hop
-
-This prevents sequence number collisions between the two directions of traffic.
-
----
-
-## 9. Cover Traffic Encryption
-
-COVER packets (Msg Type 0x11) use the same encryption scheme as RELAY packets, using the `cover_key` derived during handshake rather than the `session_key`.
-
-This means COVER packets are cryptographically distinguishable from RELAY packets only by the session key used — which only the recipient can determine. To an outside observer or relay node, COVER packets are indistinguishable from RELAY packets in size and timing.
-
----
-
-## 10. Cryptographic Agility
-
-BGP-X supports cryptographic agility through protocol versioning. The current cryptographic suite (version 1) is:
-
-| Function | Algorithm |
-|---|---|
-| Key agreement | X25519 |
-| KDF | HKDF-SHA256 |
-| AEAD | ChaCha20-Poly1305 |
-| Hash | BLAKE3 |
-| Signatures | Ed25519 |
-
-Future protocol versions MAY introduce new cryptographic suites. When a new suite is introduced:
-
-- It is identified by a suite ID negotiated during the handshake
-- Old suites remain supported for the deprecation period
-- Implementations MUST NOT mix ciphers within a single session
-
-Suite ID is included in the HANDSHAKE_INIT extension flags and HANDSHAKE_RESP selected extension flags.
+Applies identically in all routing domains.
 
 ---
 
 ## 11. Implementation Requirements
 
-Implementations MUST:
+### MUST
 
-- Use a cryptographic library with constant-time ChaCha20-Poly1305 implementation
-- Verify the Poly1305 authentication tag before processing any decrypted plaintext
-- Zeroize session keys from memory when a session is closed
-- Lock session key memory with `mlock()` or equivalent to prevent swapping (RECOMMENDED)
-- Use a CSPRNG for all random number generation (session IDs, sequence number initialization, padding bytes)
-- Never log session keys or derived key material
-- Never reuse a (key, nonce) pair
+- Use ChaCha20-Poly1305 from an audited library (NOT home-grown)
+- Verify Poly1305 authentication tag before accessing any decrypted plaintext (constant-time)
+- Use session_key for COVER packets (NOT a separate cover_key)
+- Maintain two independent sequence number spaces per session
+- Zeroize key material in the mandatory order
+- Use `mlock()` or equivalent to prevent session keys from swapping to disk
+- Support ECH at exit nodes when ech_capable=true
+- Use identical crypto suite for all routing domains (no domain-specific crypto)
+- NOT re-encrypt onion payload when transitioning between routing domains at bridge nodes
+- NOT decrypt inner layers at domain bridge nodes (only the bridge node's own layer)
 
-Implementations MUST NOT:
+### MUST NOT
 
-- Implement their own ChaCha20, Poly1305, X25519, Ed25519, or HKDF from scratch — use audited libraries
-- Use ECB mode, CBC mode, or any non-AEAD cipher for onion layers
-- Truncate authentication tags
-- Skip authentication tag verification as an optimization
-- Proceed with plaintext from a failed decryption (even partial)
-
----
-
-## 12. Recommended Cryptographic Libraries
-
-| Language | Library | Notes |
-|---|---|---|
-| Rust | `ring` or `chacha20poly1305` (RustCrypto) | Both are audited and constant-time |
-| Go | `golang.org/x/crypto/chacha20poly1305` | Standard library extension |
-| C | `libsodium` | Well-audited; widely deployed |
-| Python | `cryptography` (PyCA) | Uses OpenSSL backend |
-| JavaScript | `@noble/ciphers` | Audited pure-JS implementation |
-
-The reference implementation uses Rust with the `ring` crate.
+- Implement ChaCha20, Poly1305, X25519, Ed25519, BLAKE3, or HKDF from scratch
+- Use ECB, CBC, or any non-AEAD cipher
+- Truncate authentication tags below 16 bytes
+- Skip authentication tag verification
+- Proceed with plaintext from failed decryption
+- Reuse (key, nonce) pairs
+- Derive a separate cover_key
+- Use domain-specific key derivation
+- Re-encrypt at domain boundaries
