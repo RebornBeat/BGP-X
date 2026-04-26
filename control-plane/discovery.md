@@ -2,292 +2,247 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies how BGP-X nodes discover each other and how clients find available relay nodes to use in path construction.
-
 ---
 
 ## 1. Overview
 
-BGP-X uses a **Distributed Hash Table (DHT)** for node discovery. The DHT is the mechanism by which nodes publish their existence and capabilities, and by which clients find nodes to use in paths.
+BGP-X uses a **single unified Distributed Hash Table (DHT)** for node discovery. All routing domains — clearnet, mesh islands, satellite — participate in the same Kademlia key space.
 
-The BGP-X DHT has the following design properties:
+**Previous model (replaced)**: two separate DHTs (internet DHT + mesh DHT) with gateway synchronization.
 
-- **Fully decentralized**: No central server, no directory authority, no single point of failure or coercion
-- **Self-organizing**: Nodes join and leave without coordination
-- **Cryptographically authenticated**: All records are signed; unsigned or invalid records are rejected
-- **Privacy-preserving**: DHT queries for nodes are distinguishable from path-construction traffic only by an adversary who can observe both the query and the response at the network level
-- **Sybil-resistant**: The cost of populating the DHT with fake nodes is bounded by the signature verification requirement and the reputation system
+**Current model**: one unified DHT. Domain bridge nodes serve as the physical infrastructure for DHT storage accessible from the internet. Mesh-only nodes access the unified DHT via their bridge nodes' caches. There is no synchronization between separate DHTs because there is only one DHT.
 
 ---
 
 ## 2. DHT Algorithm
 
-BGP-X uses a **Kademlia**-style DHT. Kademlia is well-studied, widely deployed (used in BitTorrent, IPFS, Ethereum), and provides efficient O(log N) lookup in networks of N nodes.
+Kademlia-style DHT. XOR distance metric. k = 20 bucket size. α = 3 parallel queries. O(log N) lookup.
 
-### 2.1 Key space
-
-The DHT key space is 256 bits, matching the output length of BLAKE3.
-
-All DHT keys are 256-bit values. Node positions in the DHT are determined by their NodeID:
-
-```
-node_position = NodeID = BLAKE3(Ed25519_public_key)
-```
-
-### 2.2 Distance metric
-
-Kademlia uses XOR as a distance metric:
-
-```
-distance(a, b) = a XOR b
-```
-
-This metric is symmetric and satisfies the triangle inequality, making it suitable for routing decisions.
-
-### 2.3 Routing table (k-bucket structure)
-
-Each node maintains a routing table organized into **k-buckets**:
-
-- The key space is divided into 256 buckets (one per bit of the key space)
-- Each bucket covers a range of the key space at a specific distance from the node's own ID
-- Each bucket holds at most **k** node contacts (BGP-X default: k = 20)
-- Buckets are sorted by last-seen time (most recently seen first)
-
-When a bucket is full and a new node is discovered for that bucket's range:
-
-1. Ping the least-recently-seen node in the bucket
-2. If it responds: keep it, discard the new node (stable nodes are preferred)
-3. If it does not respond: replace it with the new node
-
-This replacement policy naturally favors nodes with high uptime — a Sybil attacker who floods the network with ephemeral nodes will not displace well-established nodes.
-
-### 2.4 Lookup algorithm
-
-To find nodes near a target key:
-
-1. Select the α closest known nodes to the target (BGP-X default: α = 3)
-2. Send parallel DHT_FIND_NODE queries to all α nodes
-3. From the responses, identify the k closest nodes found so far
-4. Send queries to any newly discovered nodes that are closer than the current k-closest
-5. Repeat until no closer nodes are discovered
-6. Return the k closest nodes found
-
-BGP-X uses α = 3 (3 parallel queries) as the default concurrency parameter. Higher α values speed up lookups at the cost of more network traffic.
+NodeID = BLAKE3(Ed25519_public_key) — same for all routing domains.
 
 ---
 
-## 3. Node Advertisement Storage
+## 3. Record Types and Storage Keys
 
-Node advertisements are stored in the DHT at the key:
-
+### Node Advertisement
 ```
-storage_key = BLAKE3("bgpx-node-advert-v1" || node_id)
+key = BLAKE3("bgpx-node-advert-v1" || node_id)
+TTL: 48 hours. Re-publication: every 12 hours.
 ```
 
-The prefix namespaces BGP-X records from other DHT record types and from future BGP-X record types.
+### Pool Advertisement
+```
+key = BLAKE3("bgpx-pool-v1" || pool_id)
+TTL: 7 days. Re-publication: every 3 days.
+```
 
-### 3.1 Storing an advertisement
+### Domain Bridge Advertisement
+```
+key = BLAKE3("bgpx-domain-bridge-v1" || min(from_domain_id, to_domain_id) || max(from_domain_id, to_domain_id))
+TTL: 24 hours. Re-publication: every 8 hours.
+Symmetric: A→B and B→A use same key.
+```
 
-A node publishes its advertisement by:
+### Mesh Island Advertisement
+```
+key = BLAKE3("bgpx-mesh-island-v1" || island_id_utf8_bytes)
+TTL: 24 hours. Re-publication: every 8 hours.
+```
 
-1. Constructing and signing the advertisement (see `/control-plane/node_advertisement.md`)
-2. Computing the storage key
-3. Finding the k nodes closest to the storage key via DHT lookup
-4. Sending DHT_PUT to each of those k nodes
-
-The k closest nodes to the storage key are responsible for storing the advertisement and serving it to requesters.
-
-### 3.2 Retrieving an advertisement
-
-A client retrieves a node's advertisement by:
-
-1. Computing the storage key from the known NodeID
-2. Finding the k nodes closest to the storage key
-3. Sending DHT_GET to those nodes
-4. Receiving the signed advertisement record
-5. Verifying the signature and expiry before using the record
-
-### 3.3 Re-publication
-
-Node advertisements expire after a maximum of 48 hours (set in the `expires_at` field). Nodes MUST re-publish their advertisement before it expires.
-
-Recommended re-publication interval: **every 12 hours**
-
-When re-publishing, nodes MUST update the `signed_at` and `expires_at` timestamps and re-sign the advertisement.
-
-Nodes that fail to re-publish within 48 hours will disappear from the DHT naturally as their records expire on storage nodes.
+### Pool Curator Key Rotation Record
+```
+key = BLAKE3("bgpx-pool-key-rotation-v1" || pool_id || rotation_timestamp_BE8)
+TTL: accept_until + 7 days
+```
 
 ---
 
-## 4. Bootstrap Process
+## 4. DHT Storage Authentication
 
-A new node joining the BGP-X network has no routing table. It uses bootstrap nodes to gain initial DHT access.
+Nodes accepting DHT_PUT MUST verify before storing:
 
-### 4.1 Bootstrap nodes
+```python
+function accept_put(record, storage_key):
 
-Bootstrap nodes are well-known BGP-X nodes whose IP addresses and NodeIDs are hardcoded in the BGP-X software distribution.
+    advert = parse_record(record.payload)
 
-Properties of bootstrap nodes:
+    # Verify signature
+    canonical = canonical_json(advert, exclude="signature")
+    if not ed25519_verify(advert.public_key, advert.signature, canonical.encode("utf-8")):
+        drop_silently("Invalid signature")
+        return
 
-- Run by the BGP-X project or trusted community operators
-- High uptime requirement (99%+)
-- Geographically distributed across multiple continents and jurisdictions
-- Do NOT serve as relay or exit nodes (they serve DHT only)
-- Their NodeIDs and public keys are published in the software and independently verifiable
+    # For node advertisements: verify NodeID
+    if advert.type == "node_advertisement":
+        if advert.node_id != hex(BLAKE3(base64url_decode(advert.public_key))):
+            drop_silently("NodeID mismatch")
+            return
 
-Bootstrap nodes are not trusted authorities. They are entry points into the DHT graph. Once a joining node has populated its routing table, bootstrap nodes are no longer needed for routing.
+    # For domain bridge advertisements: verify node serves both bridged domains
+    if advert.type == "domain_bridge_advertisement":
+        # Fetch node's own advertisement from DHT cache
+        node_advert = get_from_dht_cache(advert.node_id)
+        if node_advert:
+            if not node_advert.bridge_capable:
+                drop_silently("Non-bridge node claiming bridge capability")
+                return
 
-### 4.2 Bootstrap sequence
+    # Verify timestamps
+    if advert.expires_at <= current_time():
+        drop_silently("Expired advertisement")
+        return
 
-```
-1. Node starts with hardcoded bootstrap node list
-2. For each bootstrap node:
-   a. Send DHT_FIND_NODE(target = own NodeID)
-   b. Receive k closest nodes to own NodeID
-   c. Add discovered nodes to routing table
-3. Send DHT_FIND_NODE to newly discovered nodes
-   (iterative lookup converging on own NodeID)
-4. Routing table is now populated
-5. Publish own advertisement via DHT_PUT
-6. Node is now a full DHT participant
-```
-
-### 4.3 Bootstrap node failure tolerance
-
-If fewer than 3 bootstrap nodes are reachable:
-
-- Log a warning
-- Retry after 30 seconds (exponential backoff up to 5 minutes)
-- Continue attempting to join until successful
-
-If no bootstrap nodes are reachable after 15 minutes:
-
-- Log an error
-- Enter BOOTSTRAP_FAILED state
-- Alert operator
-
-BGP-X clients that cannot reach any bootstrap node MUST NOT attempt to use the network (they cannot verify they have valid node data).
-
----
-
-## 5. DHT Privacy Considerations
-
-The DHT presents privacy challenges for clients:
-
-- DHT queries reveal the NodeIDs the client is interested in
-- A DHT node that receives many queries from the same IP can infer that IP is building paths
-- A DHT node could serve manipulated advertisements (Sybil nodes) to influence path selection
-
-### 5.1 Query routing through overlay
-
-Once a client has established any BGP-X path, all subsequent DHT queries SHOULD be routed through that path rather than sent directly.
-
-This means:
-
-- The DHT nodes that receive queries see only the exit node's IP, not the client's real IP
-- The exit node cannot correlate individual queries with specific clients
-- The client's path-building activity is not visible to DHT participants
-
-### 5.2 Query batching
-
-Clients SHOULD batch DHT queries — fetching multiple node advertisements in a single path traversal — to reduce the number of observable queries.
-
-### 5.3 Prefetching
-
-Clients SHOULD prefetch node advertisements proactively (before they are needed for path construction) and maintain a local cache of valid advertisements.
-
-Cache size: 500–1000 node advertisements
-Cache TTL: 30 minutes (independent of advertisement expiry)
-
-Prefetching reduces the correlation between path-construction events and DHT query patterns.
-
-### 5.4 Sybil resistance in node selection
-
-Even if an adversary populates the DHT with many Sybil nodes, they cannot force a client to use those nodes because:
-
-- The path selection algorithm uses weighted random selection (Sybil nodes would need to outcompete legitimate nodes on reputation, uptime, and latency metrics)
-- The reputation system flags nodes with anomalous behavior patterns
-- Geographic and ASN diversity constraints limit how many nodes a single operator can place in a single path
-
----
-
-## 6. DHT Maintenance
-
-### 6.1 Routing table refresh
-
-Nodes MUST refresh any k-bucket that has not been queried in the last 60 minutes by performing a DHT_FIND_NODE for a random key in that bucket's range. This ensures the routing table remains accurate as nodes join and leave.
-
-### 6.2 Dead node removal
-
-A node is considered dead if:
-
-- It fails to respond to 3 consecutive DHT queries over a period of 5 minutes
-
-Dead nodes are removed from the routing table and replaced by the next candidate in the replacement cache.
-
-### 6.3 Stale advertisement pruning
-
-Storage nodes MUST prune expired advertisements (where current time > `expires_at`) from their local DHT storage. This frees storage and prevents stale data from being served to clients.
-
----
-
-## 7. DHT Message Formats
-
-DHT messages use the BGP-X common header with message types 0x0B through 0x0F. Full wire formats are specified in `/protocol/packet_format.md` and `/protocol/protocol_spec.md`.
-
-### 7.1 DHT_FIND_NODE (0x0B)
-
-Sent to discover nodes near a target NodeID.
-
-Request payload:
-- Target NodeID (32 bytes)
-- Max results (1 byte, 1–20, default 20)
-
-Response (DHT_FIND_NODE_RESP, 0x0C):
-- Result count (1 byte)
-- Array of NodeContact entries (40 bytes each)
-
-### 7.2 DHT_PUT (0x0F)
-
-Sent to store a node advertisement.
-
-Payload:
-- Record length (4 bytes)
-- Signed node advertisement JSON (variable, max 4096 bytes)
-
-Response: None (fire-and-forget). Failures are handled by redundant PUT to multiple storage nodes.
-
-### 7.3 DHT_GET (0x0D)
-
-Sent to retrieve a node advertisement by NodeID.
-
-Request payload:
-- Target NodeID (32 bytes)
-
-Response (DHT_GET_RESP, 0x0E):
-- Found flag (1 byte)
-- Record length (4 bytes, if found)
-- Signed node advertisement JSON (variable, if found)
-
----
-
-## 8. Network Size Estimation
-
-Nodes SHOULD maintain an estimate of total network size for informational purposes. This is computed using the standard Kademlia method:
-
-```
-estimated_network_size = 2^256 / average_distance_between_k_closest_nodes
+    # Accept and store
+    storage.put(storage_key, record.payload, ttl=advert.expires_at - current_time())
 ```
 
-This estimate is used by:
-- The reputation system (to detect anomalous concentrations of nodes)
-- The path selection algorithm (to estimate anonymity set size)
-- Monitoring and metrics
+---
+
+## 5. Domain-Filtered DHT Queries
+
+DHT_FIND_NODE extended with optional domain filter:
+
+```
+Standard DHT_FIND_NODE payload:
+  Target NodeID (32 bytes)
+
+Extended DHT_FIND_NODE payload:
+  Target NodeID (32 bytes)
+  Domain filter flag (1 byte): 0x00 = no filter, 0x01 = filter active
+  Domain ID (8 bytes): only present if flag = 0x01
+```
+
+When filter active: storage nodes return only contacts with advertised endpoints in the specified routing domain.
 
 ---
 
-## 9. IPv6 Support
+## 6. Bootstrap Process
 
-BGP-X DHT MUST support IPv6 node addresses. NodeContact entries carry IPv4 addresses in the current format. An extended NodeContact format for IPv6 will be introduced in a future MINOR version.
+### Internet Mode
 
-For the current version, nodes with IPv6 addresses SHOULD also advertise an IPv4 address for DHT participation. Clients operating on IPv6-only networks SHOULD use a bootstrap node that supports IPv6.
+New nodes bootstrap via hardcoded list → DHT_FIND_NODE → populate routing table → publish own advertisement.
+
+DNS fallback: `_bgpx-bootstrap._udp.bgpx.network` TXT records (queried via DoH).
+
+Additional bootstrap step for cross-domain:
+```
+After DHT routing table populated:
+  → Query for DOMAIN_ADVERTISE records for needed bridge pairs
+  → Query for MESH_ISLAND_ADVERTISE for known island IDs
+  → Cache bridge node and island records for path construction
+```
+
+### Mesh-Only Mode
+
+Bootstrap via MESH_BEACON broadcast. No hardcoded internet bootstrap nodes needed. Bootstrap complete when routing table has ≥ 5 entries from ≥ 2 distinct nodes.
+
+After local DHT populated, mesh nodes can access unified internet DHT via their bridge nodes:
+- Mesh node sends DHT query to bridge node via mesh transport
+- Bridge node executes query against unified internet DHT
+- Returns results via mesh transport
+
+### Bootstrap for Cross-Domain Discovery
+
+When a mesh island wants to discover another island or clearnet nodes:
+1. Mesh node queries local bridge node for MESH_ISLAND_ADVERTISE of target island
+2. Bridge node queries unified internet DHT if not in local cache
+3. Mesh node uses returned island advertisement to find bridge nodes for target island
+4. Path construction proceeds
+
+---
+
+## 7. Domain Bridge Discovery
+
+```python
+function discover_bridge_nodes(from_domain, to_domain):
+
+    # Compute symmetric bridge key
+    sorted_pair = sorted([from_domain.id_bytes, to_domain.id_bytes])
+    bridge_key = BLAKE3("bgpx-domain-bridge-v1" || sorted_pair[0] || sorted_pair[1])
+
+    bridge_record = dht_get(bridge_key)
+    if bridge_record is None:
+        return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+    if not verify_bridge_record_signature(bridge_record):
+        return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+    verified_bridges = []
+    for node_id in bridge_record.bridge_nodes:
+        node_advert = dht_get(BLAKE3("bgpx-node-advert-v1" || node_id))
+        if node_advert and verify_node_advertisement(node_advert):
+            if node_advert.bridge_capable and serves_both_domains(node_advert, from_domain, to_domain):
+                verified_bridges.append(node_advert)
+
+    if not verified_bridges:
+        return FAIL(ERR_DOMAIN_BRIDGE_UNAVAILABLE)
+
+    return verified_bridges
+```
+
+---
+
+## 8. Unified DHT Participation by Mesh-Only Nodes
+
+**Publishing**:
+- Mesh node constructs its node advertisement
+- Sends to bridge node via mesh transport
+- Bridge node publishes to unified internet DHT via DHT_PUT
+- Mesh node's advertisement is globally discoverable
+
+**Querying**:
+- Mesh node sends DHT query to bridge node via mesh transport
+- Bridge node executes query against unified internet DHT
+- Returns results via mesh transport
+
+**Offline mode** (no bridge node):
+- Mesh node participates only in local mesh DHT (via MESH_BEACON bootstrap)
+- Advertisement not globally discoverable
+- When bridge reconnects: pending mesh advertisement published to unified DHT
+
+---
+
+## 9. Routing Table Maintenance
+
+**Bucket refresh**: any k-bucket not queried in last 60 minutes → DHT_FIND_NODE for random key in that range.
+
+**Dead node removal**: fails 3 consecutive queries over 5 minutes → removed from routing table.
+
+**Stale advertisement pruning**: storage nodes MUST prune expired advertisements.
+
+---
+
+## 10. Geographic Plausibility Integration
+
+DHT routing table maintenance includes RTT measurement per node. Domain-specific thresholds applied. RTT measurements feed the geographic plausibility scoring system.
+
+---
+
+## 11. Pool Discovery
+
+Standard pool discovery: `DHT_GET(BLAKE3("bgpx-pool-v1" || pool_id))`.
+
+Domain-scoped pool discovery: after retrieval, verify `pool.domain_scope` matches required segment domain.
+
+Domain-bridge pool discovery: after retrieval, verify `pool.bridges` matches required domain transition pair.
+
+---
+
+## 12. Island Collision Detection
+
+When a mesh island registers island_id in the unified DHT:
+1. Perform DHT_GET for island_key before publishing
+2. If record exists from different operator: collision detected; choose different island_id
+3. island_id should be descriptive and geographically specific (e.g., `lima-san-isidro-2026` not `community-1`)
+
+---
+
+## 13. DHT Privacy Considerations
+
+**Query routing through overlay**: once a client has established any BGP-X path, all subsequent DHT queries SHOULD be routed through that path. Domain-filtered queries for mesh island nodes reveal interest in that island to DHT storage nodes.
+
+**Query batching**: fetch multiple bridge records and island records in one path traversal.
+
+**Pre-fetch**: commonly needed bridge records (for frequently used domain transitions) pre-fetched before path construction events.
+
+**Mesh island privacy**: islands that want to remain undiscoverable from clearnet should not publish MESH_ISLAND_ADVERTISE (operate in offline mode only, accessible via known bridge node only).
