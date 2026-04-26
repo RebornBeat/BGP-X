@@ -2,480 +2,356 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the BGP-X node daemon (`bgpx-node`) — the software that runs on relay, entry, exit, and discovery nodes. It covers the daemon's architecture, configuration, lifecycle, operational requirements, and behavior under all conditions.
+---
+
+## 1. Deployment Context
+
+The BGP-X node daemon (`bgpx-node`) is the single BGP-X routing stack and inter-protocol domain router. It runs on a network router or standalone device. All other components are clients of this daemon.
+
+### Deployment Roles
+
+All six existing deployment modes are retained. Additionally, any node with multiple `[[routing_domains]]` entries configured is automatically a **domain bridge node**.
+
+A single bgpx-node daemon can simultaneously be:
+- A clearnet relay
+- A mesh island gateway (bridge to clearnet)
+- A mesh-to-mesh bridge (between two mesh islands)
 
 ---
 
-## 1. Overview
-
-The BGP-X node daemon is the core server-side component of the BGP-X overlay network. It is responsible for:
-
-- Accepting and managing BGP-X sessions from clients and other nodes
-- Relaying onion-encrypted packets through the overlay
-- Participating in the DHT for node discovery
-- Publishing and maintaining the node's signed advertisement
-- Enforcing exit policy (for exit nodes)
-- Exposing a local Control API for management tooling
-
-The daemon is designed to run as a long-lived background process on Linux systems, from commodity VPS instances to embedded router hardware.
-
----
-
-## 2. Daemon Architecture
-
-The node daemon is structured as a set of cooperating async tasks within a single process. The reference implementation uses Rust with Tokio as the async runtime.
+## 2. Architecture
 
 ```
 bgpx-node process
-├── Main task
-│   ├── Signal handler (SIGTERM, SIGINT, SIGHUP)
-│   └── Lifecycle coordinator
+├── Main task (signal handler, lifecycle coordinator)
 │
 ├── Network I/O subsystem
-│   ├── UDP listener (forwarding pipeline)
-│   │   ├── Receiver threads (SO_REUSEPORT, N = CPU cores / 2)
-│   │   └── Sender thread pool (4 threads)
-│   └── TCP listener (exit node only, outbound connections)
+│   ├── UDP listener (clearnet transport, SO_REUSEPORT)
+│   ├── Mesh transport handlers (per domain/island)
+│   ├── Satellite transport handler (if configured)
+│   └── Sender thread pool (4 threads, domain-aware)
 │
-├── Session manager
-│   ├── Session table (sharded concurrent hash map)
-│   ├── Handshake handler
-│   └── Keepalive monitor
+├── Domain Manager (NEW)
+│   ├── Routing domain registry (which domains this node serves)
+│   ├── Domain bridge manager
+│   │   ├── Cross-domain path_id table (path_id → domain pair routing)
+│   │   ├── Domain bridge transition handler (DOMAIN_BRIDGE hop processing)
+│   │   └── Bridge availability tracker (monitors each bridge pair)
+│   ├── Mesh island manager
+│   │   ├── Island registry (known mesh islands)
+│   │   ├── Island DHT cache
+│   │   └── Island advertisement publisher
+│   └── Transport selector (correct transport per domain)
 │
-├── DHT subsystem
-│   ├── Routing table (k-bucket structure)
-│   ├── Advertisement publisher
-│   ├── Advertisement store (records this node is responsible for)
-│   └── Bootstrap manager
+├── Forwarding pipeline (DOMAIN_BRIDGE hop type support added)
 │
-├── Control API server
-│   └── Unix domain socket (JSON-RPC 2.0)
+├── Session manager (domain-agnostic)
 │
-├── Reputation system
-│   ├── Reputation database
-│   └── Event processor
+├── DHT subsystem (unified, domain-aware queries)
 │
-├── Exit policy engine (exit nodes only)
-│   ├── Policy evaluator
-│   └── Outbound connection manager
+├── Routing Policy Engine (domain-aware rules)
+│
+├── SDK Socket server
+│
+├── Control API server (domain management methods added)
+│
+├── Reputation system (domain-aware event tagging)
+│
+├── Exit policy engine (exit/gateway nodes only)
+│
+├── Pluggable transport (when enabled)
 │
 └── Metrics collector
-    ├── In-memory counters
-    └── Prometheus exporter (optional)
 ```
 
 ---
 
 ## 3. Configuration
 
-The node daemon is configured via a TOML configuration file, by default located at:
-
-```
-/etc/bgpx/node.toml        (system install)
-~/.config/bgpx/node.toml   (user install)
-```
-
-### 3.1 Complete configuration reference
-
 ```toml
 # BGP-X Node Configuration
-# All values shown are defaults unless marked REQUIRED
 
 [node]
-# REQUIRED: Path to the node's Ed25519 private key file (PEM or raw bytes)
 private_key_path = "/etc/bgpx/node_private_key"
-
-# REQUIRED: Roles this node serves
-# Valid values: "relay", "entry", "exit", "discovery"
 roles = ["relay", "entry", "discovery"]
-
-# Human-readable node name (used in logs only, not published)
-name = "bgpx-node-1"
-
-# Data directory for persistent state (reputation DB, DHT routing table)
+name = "my-bgpx-relay-1"
 data_dir = "/var/lib/bgpx"
-
-# Log level: "error", "warn", "info", "debug", "trace"
 log_level = "info"
+log_format = "json"
+log_destination = "/var/log/bgpx/node.log"
 
-# Log format: "text" or "json"
-log_format = "text"
+# Routing domains this node serves
+# For single-domain clearnet node: one [[routing_domains]] entry
+# For bridge node: two or more [[routing_domains]] entries
 
-# Log destination: "stdout", "syslog", or a file path
-log_destination = "stdout"
-
-[network]
-# UDP listen address and port for BGP-X overlay traffic
+[[routing_domains]]
+domain_type = "clearnet"
+enabled = true
 listen_addr = "0.0.0.0"
 listen_port = 7474
-
-# IPv6 listen address (optional; enables dual-stack)
 listen_addr_v6 = "::"
-listen_port_v6 = 7474
-
-# Public IP address to advertise in DHT (REQUIRED if behind NAT)
-# If not set, the daemon attempts auto-detection via STUN
 public_addr = ""
-
-# Public port to advertise (defaults to listen_port)
 public_port = 7474
 
-# SO_RCVBUF size in bytes
-socket_recv_buffer = 16777216  # 16 MB
+# Mesh island (add for bridge/gateway nodes):
+# [[routing_domains]]
+# domain_type = "mesh"
+# island_id = "my-island-name"
+# enabled = true
+# transports = ["wifi_mesh", "lora"]
+# wifi_mesh_interface = "mesh0"
+# lora_interface = "/dev/ttyUSB0"
+# lora_frequency_mhz = 868.0
+# lora_spreading_factor = 7
 
-# SO_SNDBUF size in bytes
-socket_send_buffer = 16777216  # 16 MB
+# Domain bridge (auto-detected from routing_domains, or explicit):
+[domain_bridge]
+enabled = false
+# bridges = [
+#     { from = "clearnet", to = "mesh:my-island-name" }
+# ]
+
+[mesh_island]
+auto_publish_advertisement = true
+advertisement_interval_hours = 8
+island_dht_sync = true
 
 [sessions]
-# Maximum concurrent sessions
 max_sessions = 10000
-
-# Session idle timeout in seconds (no traffic for this duration = close)
 session_idle_timeout_seconds = 90
-
-# Keepalive interval in seconds (randomized ± 5s)
+session_idle_timeout_lora_seconds = 300
 keepalive_interval_seconds = 25
-
-# Maximum handshake completion time in seconds
 handshake_timeout_seconds = 10
-
-# Maximum per-session bandwidth in Mbps (0 = unlimited)
+handshake_timeout_lora_seconds = 60
 max_session_bandwidth_mbps = 0
+session_rehandshake_age_hours = 24
 
 [bandwidth]
-# Total outbound bandwidth cap in Mbps (0 = unlimited)
 total_bandwidth_mbps = 0
-
-# Bandwidth reserved for DHT and control traffic (Mbps)
 reserved_bandwidth_mbps = 10
 
 [dht]
-# Bootstrap nodes (list of "node_id@ip:port" entries)
-# These are the well-known BGP-X bootstrap nodes
-bootstrap_nodes = [
-    "a3f2b9c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1@203.0.113.1:7474",
-    "b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3@203.0.113.2:7474",
-]
-
-# k value for k-bucket routing table (nodes per bucket)
+bootstrap_nodes = []
 k = 20
-
-# Alpha value for parallel lookups
 alpha = 3
-
-# Routing table refresh interval in minutes
 refresh_interval_minutes = 60
-
-# Advertisement re-publication interval in hours
 republish_interval_hours = 12
-
-# Advertisement validity period in hours (max 48)
 advertisement_validity_hours = 24
-
-# Maximum DHT records this node will store for others
 max_stored_records = 10000
 
 [advertisement]
-# Self-reported performance metrics (used in node advertisement)
 bandwidth_mbps = 100
 latency_ms = 12
-
-# Region: "NA", "EU", "AP", "SA", "AF", "ME"
 region = "EU"
-
-# Country: ISO 3166-1 alpha-2
 country = "DE"
-
-# ASN of the network this node is on
 asn = 12345
-
-# Operator public key (base64url Ed25519 public key)
-# Links this node to an operator identity for reputation aggregation
 operator_id = ""
-
-# Path to operator private key (used to sign exit policies)
-# Only required for exit nodes
 operator_private_key_path = ""
 
 [exit_policy]
-# Only relevant if "exit" is in node.roles
-
-# Protocols to forward: ["tcp"], ["udp"], or ["tcp", "udp"]
 allow_protocols = ["tcp", "udp"]
-
-# Destination ports to allow (empty list = all ports)
-# Recommended: restrict to common service ports
-allow_ports = [80, 443, 8080, 8443, 8000]
-
-# CIDR ranges to always deny (private ranges MUST be included)
+allow_ports = [80, 443, 8080, 8443]
 deny_destinations = [
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    "127.0.0.0/8",
-    "169.254.0.0/16",
-    "::1/128",
-    "fc00::/7",
-    "fe80::/10",
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10",
+    "::1/128", "fc00::/7", "fe80::/10"
 ]
-
-# Logging policy: "none", "metadata", "full"
 logging_policy = "none"
-
-# Operator contact (published in exit policy)
 operator_contact = ""
-
-# Jurisdiction (ISO 3166-1 country code of legal jurisdiction)
 jurisdiction = "DE"
-
-# Maximum outbound connections at the exit node
 max_outbound_connections = 2000
-
-# Connection timeout for outbound clearnet connections (seconds)
 outbound_connect_timeout_seconds = 10
+dns_mode = "doh"
+dns_resolver = "https://dns.quad9.net/dns-query"
+dnssec_validation = true
+ecs_handling = "strip"
+ech_capable = true
+
+[pools]
+member_pools = []
+discover_pools = ["bgpx-default"]
+pool_minimum_members = 5
+fallback_to_default = true
+
+[sdk_api]
+socket_path = "/var/run/bgpx/sdk.sock"
+tcp_listen = ""
+tcp_auth_required = true
+tcp_auth_token_path = "/etc/bgpx/sdk_auth_token"
+
+[routing_policy]
+policy_file = "/etc/bgpx/routing_policy.toml"
+default_action = "bgpx"
 
 [control_api]
-# Unix socket path for Control API
 socket_path = "/var/run/bgpx/control.sock"
-
-# Socket file permissions (octal)
 socket_permissions = "0600"
 
 [reputation]
-# Enable distributed reputation system (publish/receive reputation records)
-distributed_reputation_enabled = false
+geo_plausibility_enabled = true
+geo_plausibility_warn_threshold = 2.0
+geo_plausibility_alert_threshold = 3.0
+enforce_global_blacklist = false
+blacklist_default_duration_days = 30
+blacklist_auto_review = true
 
-# Minimum reporter reputation to accept distributed reports
-min_reporter_reputation = 70.0
+[pluggable_transport]
+enabled = false
+mode = "builtin"
+binary_path = ""
+listen_addr = "127.0.0.1"
+listen_port = 7475
+timing_jitter_max_ms = 50
+max_padding_bytes = 200
+apply_to_mesh = false
 
-# Blacklist threshold (reputation below this = blacklisted, after min_observations)
-blacklist_threshold = 15.0
-
-# Minimum observations before blacklisting
-min_observations_before_blacklist = 10
+[mesh]
+enabled = false
+transports = []
+wifi_mesh_interface = ""
+lora_interface = ""
+lora_frequency_mhz = 868.0
+beacon_interval_seconds = 30
 
 [extensions]
-# Enable cover traffic generation
 cover_traffic_enabled = false
-
-# Cover traffic target rate in Kbps
 cover_traffic_target_kbps = 100
-
-# Enable pluggable transport (obfuscates BGP-X traffic)
-pluggable_transport_enabled = false
-pluggable_transport_binary = ""
-
-# Enable stream multiplexing
-multiplexing_enabled = true
-
-# Enable path quality reporting
 path_quality_reporting_enabled = true
+cross_domain_routing_enabled = true
+domain_bridge_enabled = true
+
+[store_and_forward]
+enabled = false
+buffer_size_kb = 1024
+packet_ttl_seconds = 3600
 
 [metrics]
-# Enable Prometheus metrics exporter
 prometheus_enabled = false
-
-# Prometheus listen address
 prometheus_addr = "127.0.0.1"
 prometheus_port = 9474
 ```
 
 ---
 
-## 4. Node Lifecycle
+## 4. Logging Policy
 
-### 4.1 Startup sequence
+Valid production log levels: `error`, `warn`, `info`. `debug` and `trace` are NOT valid in production builds.
+
+### Prohibited Log Content
+
+The following MUST NEVER appear in any log file under any log level:
+- Client IP addresses at relay or exit nodes
+- Destination addresses at any node
+- path_id values
+- Path composition (which nodes appeared in same path)
+- Session identifiers
+- Traffic volume per path or per session
+- Pool query history
+- Application data content
+- Specific denied destination addresses (log denial category only)
+- Which routing domains a specific session traversed
+- Cross-domain path composition
+- Mesh island identifiers associated with specific sessions
+
+---
+
+## 5. Startup Sequence
 
 ```
-1. Parse and validate configuration file
-   ├── Verify required fields are present
-   ├── Verify private key file is readable and valid
-   └── If exit role: verify exit policy fields are complete
-
-2. Load or generate node identity
-   ├── Load Ed25519 private key from private_key_path
-   ├── Derive public key and NodeID
-   └── Log NodeID at INFO level
-
-3. Initialize data directory
-   ├── Create data_dir if not exists
-   ├── Load reputation database from data_dir/reputation.db
-   └── Load DHT routing table from data_dir/routing_table.db
-
-4. Initialize network subsystem
-   ├── Bind UDP socket to listen_addr:listen_port
-   ├── Set socket buffer sizes
-   └── If IPv6 enabled: bind IPv6 socket
-
-5. Initialize session manager
-   └── Start keepalive monitor background task
-
-6. Initialize DHT subsystem
-   ├── Load routing table from disk
-   ├── Connect to bootstrap nodes
-   ├── Perform DHT_FIND_NODE(own NodeID) to populate routing table
-   └── On success: publish node advertisement (DHT_PUT)
-
-7. Initialize exit policy engine (if exit role)
-   ├── Load exit policy from configuration
-   ├── Sign exit policy with operator private key
-   └── Include signed policy in node advertisement
-
-8. Start Control API server
-   └── Bind Unix socket at control_api.socket_path
-
-9. Start metrics exporter (if enabled)
-
-10. Enter ACTIVE state
-    └── Log "Node active. NodeID: <node_id>" at INFO level
+1.  Parse and validate configuration
+2.  Load node identity (Ed25519 private key, derive NodeID)
+3.  Initialize data directory; load reputation database and DHT routing table
+4.  Initialize Network I/O subsystem (UDP socket, bind port 7474)
+5.  Initialize Session manager
+6.  Initialize Pool manager; load configured pools; verify signatures
+7.  Initialize Domain Manager
+    a. For each [[routing_domains]] entry: initialize appropriate transport
+    b. If bridge_capable (2+ domains): initialize domain bridge manager
+    c. If mesh domains: initialize mesh island manager
+8.  Initialize DHT subsystem
+    a. Internet mode: connect to bootstrap nodes; populate routing table
+    b. Mesh-only mode: broadcast MESH_BEACON; populate from beacons
+    c. Publish node advertisement
+    d. If bridge_capable: publish DOMAIN_ADVERTISE for each bridge pair
+    e. If island manager: publish MESH_ISLAND_ADVERTISE if internet available
+9.  Initialize Exit policy engine (if exit/gateway role)
+10. Initialize Routing Policy Engine (dual-stack mode)
+11. Initialize Pluggable transport (if enabled)
+12. Initialize SDK Socket server
+13. Initialize Control API server
+14. Initialize Metrics exporter (if enabled)
+15. Initialize Session re-handshake scheduler (24hr background task)
+16. Enter ACTIVE state
+    → Log "Node active. NodeID: <node_id>"
 ```
 
-### 4.2 SIGHUP handling (config reload)
+---
 
-On receiving SIGHUP, the daemon reloads the configuration file. Live-reloadable options are applied immediately. Non-reloadable options require a full restart.
-
-Live-reloadable options:
-- `max_sessions`
-- `total_bandwidth_mbps`
-- `max_session_bandwidth_mbps`
-- `log_level`
-- `cover_traffic_enabled`
-- `cover_traffic_target_kbps`
-- `exit_policy.allow_ports` (takes effect for new streams only)
-- `exit_policy.deny_destinations` (takes effect for new streams only)
-
-Non-reloadable (require restart):
-- `private_key_path`
-- `listen_addr` / `listen_port`
-- `data_dir`
-- `control_api.socket_path`
-
-### 4.3 Graceful shutdown (SIGTERM / SIGINT)
+## 6. Graceful Shutdown (SIGTERM/SIGINT)
 
 ```
 1. Transition to DRAIN state
-   └── Stop accepting new sessions (reject new HANDSHAKE_INIT)
+   a. Publish NODE_WITHDRAW
+   b. Set bridge.available = false in DOMAIN_ADVERTISE and re-publish
+   c. Wait up to 30 seconds for DHT propagation
 
-2. Wait for in-flight sessions to complete
-   ├── Send KEEPALIVE to all active sessions
-   ├── Wait up to shutdown_timeout_seconds (default 30)
-   └── After timeout: force-close remaining sessions
+2. Stop accepting new sessions
 
-3. Flush reputation database to disk
+3. Wait for in-flight sessions to complete (up to shutdown_timeout, default 30s)
 
-4. Flush DHT routing table to disk
+4. Flush reputation database to disk
+5. Flush DHT routing table to disk
+6. Remove Control API and SDK socket files
 
-5. Remove Control API socket file
+7. Zeroize all session keys in memory (MANDATORY)
+   - session_key for all active sessions
+   - keepalive_key for all active sessions
 
-6. Zeroize all session keys in memory
-
-7. Exit with code 0
+8. Exit with code 0
 ```
-
-### 4.4 Crash recovery
-
-On unexpected termination (crash, OOM kill, power loss):
-
-- All in-flight sessions are irrecoverably lost (no session resumption by design)
-- The DHT routing table and reputation database are restored from disk on next start
-- The node re-publishes its advertisement within the bootstrap phase
-- Clients whose paths included this node will detect the failure via KEEPALIVE timeout and rebuild their paths
 
 ---
 
-## 5. Key Management
+## 7. SIGHUP (Config Reload)
 
-### 5.1 Key generation
-
-The node's Ed25519 private key is generated once and stored at `private_key_path`. It MUST NOT be regenerated unless the operator intentionally changes the node's identity (doing so changes the NodeID and loses all accumulated reputation).
-
-Key generation command (provided by `bgpx-cli`):
-
-```bash
-bgpx-cli keygen --output /etc/bgpx/node_private_key
+Live-reloadable:
+```
+max_sessions, total_bandwidth_mbps, max_session_bandwidth_mbps,
+log_level, cover_traffic_enabled, cover_traffic_target_kbps,
+exit_policy.allow_ports (new streams), exit_policy.deny_destinations (new streams),
+pool discovery configuration, routing policy rules,
+domain_bridge bridge availability states,
+mesh_island.advertisement_interval_hours
 ```
 
-Output format: raw 32-byte Ed25519 seed, written to a file with permissions 0600.
-
-### 5.2 Key storage requirements
-
-The private key file MUST be:
-- Readable only by the bgpx-node process user (permissions 0600)
-- Stored on a filesystem that does not make temporary copies (avoid `/tmp` and network filesystems)
-- Backed up securely (loss of the private key means loss of node identity and reputation)
-
-For high-security deployments, the key SHOULD be stored in a hardware security module (HSM) or a secrets manager (e.g., HashiCorp Vault). HSM integration is a planned extension.
-
-### 5.3 Key rotation
-
-Rotating the node private key changes the NodeID and requires:
-1. Generating a new keypair
-2. Publishing a signed rotation notice from the old key (planned feature)
-3. Updating the `private_key_path` configuration
-4. Restarting the daemon
-
-Until the rotation notice feature is implemented, key rotation is equivalent to establishing a new node identity. Existing reputation is not transferable.
+Requires restart:
+```
+private_key_path, listen_addr, listen_port, data_dir,
+control_api.socket_path, sdk_api.socket_path,
+[[routing_domains]] entries
+```
 
 ---
 
-## 6. Resource Requirements
+## 8. Resource Requirements
 
-### 6.1 Minimum hardware (relay node)
-
-| Resource | Minimum | Recommended |
+| Resource | Relay Only | Domain Bridge (2 domains) |
 |---|---|---|
-| CPU | 1 core | 4 cores |
-| RAM | 256 MB | 1 GB |
-| Disk | 1 GB | 10 GB |
-| Network | 10 Mbps symmetric | 1 Gbps symmetric |
-| OS | Linux kernel 5.15+ | Linux kernel 6.1+ |
+| RAM | 256 MB minimum | 512 MB minimum |
+| CPU | 1 core | 2 cores |
+| Disk | 1 GB | 2 GB |
+| Network | 10 Mbps symmetric relay / 100 Mbps gateway | Same, dual interface |
 
-### 6.2 Minimum hardware (exit / gateway node)
-
-| Resource | Minimum | Recommended |
-|---|---|---|
-| CPU | 2 cores | 8 cores |
-| RAM | 512 MB | 4 GB |
-| Disk | 5 GB | 20 GB |
-| Network | 100 Mbps symmetric | 10 Gbps symmetric |
-| OS | Linux kernel 5.15+ | Linux kernel 6.1+ |
-
-Exit nodes require more resources because they:
-- Maintain outbound TCP connections to clearnet destinations (each connection uses OS resources)
-- Perform DNS resolution
-- Handle response buffering for clearnet connections
-
-### 6.3 Memory scaling
-
-Memory usage scales approximately linearly with session count:
-
+Memory scaling:
 ```
-estimated_memory_MB ≈ base_overhead_MB + (session_count × 0.256 MB)
-                    ≈ 50 + (10000 × 0.256)
-                    ≈ 2610 MB at maximum sessions (10,000)
+estimated_MB ≈ 50 + (session_count × 0.256) + (cross_domain_path_entries × 0.1)
 ```
-
-For nodes with fewer than 2,000 concurrent sessions, 512 MB RAM is sufficient.
 
 ---
 
-## 7. Security Hardening
+## 9. Security Hardening
 
-The following hardening measures SHOULD be applied to production node deployments:
-
-### 7.1 Process isolation
-
-```bash
-# Run as a dedicated non-root user
-useradd --system --no-create-home --shell /sbin/nologin bgpx
-
-# Set file ownership
-chown bgpx:bgpx /etc/bgpx/node_private_key
-chown -R bgpx:bgpx /var/lib/bgpx
-chown bgpx:bgpx /var/run/bgpx
-```
-
-### 7.2 systemd service hardening
+### systemd Service
 
 ```ini
 [Service]
@@ -486,7 +362,7 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/bgpx /var/run/bgpx
+ReadWritePaths=/var/lib/bgpx /var/run/bgpx /var/log/bgpx
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 SystemCallFilter=@system-service
@@ -494,164 +370,44 @@ MemoryDenyWriteExecute=true
 RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
-```
-
-### 7.3 Network firewall rules
-
-For a relay-only node (no exit), the following iptables rules apply:
-
-```bash
-# Allow BGP-X overlay traffic
-iptables -A INPUT -p udp --dport 7474 -j ACCEPT
-
-# Allow Control API (local only — no inbound rule needed; Unix socket)
-
-# Drop all other inbound traffic
-iptables -A INPUT -j DROP
-
-# Allow all outbound BGP-X traffic (to other relay nodes)
-iptables -A OUTPUT -p udp --dport 7474 -j ACCEPT
-
-# Allow outbound DHT traffic (same port)
-# Allow outbound DNS for bootstrap resolution
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-
-# Drop other outbound (relay nodes should not initiate clearnet connections)
-iptables -A OUTPUT -j DROP
-```
-
-For exit nodes, outbound clearnet traffic must be permitted on relevant ports per exit policy.
-
-### 7.4 Kernel parameters
-
-Recommended sysctl settings:
-
-```ini
-# Network performance
-net.core.rmem_max = 134217728
-net.core.wmem_max = 134217728
-net.core.netdev_max_backlog = 65536
-
-# Security
-kernel.dmesg_restrict = 1
-kernel.kptr_restrict = 2
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.icmp_echo_ignore_broadcasts = 1
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LimitNOFILE=65536
 ```
 
 ---
 
-## 8. Monitoring and Observability
+## 10. Monitoring
 
-### 8.1 Log output
-
-The daemon logs structured events to the configured destination. All log entries include:
-- Timestamp (ISO 8601 UTC)
-- Log level
-- Component (network, dht, session, exit, control_api)
-- Message
-
-Log entries MUST NOT include:
-- Client IP addresses
-- Session IDs
-- Destination addresses
-- Any traffic content
-
-Example log output (JSON format):
-
-```json
-{"timestamp":"2026-04-24T12:00:00Z","level":"INFO","component":"dht","message":"Bootstrap complete. Routing table populated with 342 nodes."}
-{"timestamp":"2026-04-24T12:00:01Z","level":"INFO","component":"network","message":"Node advertisement published. Expires in 24 hours."}
-{"timestamp":"2026-04-24T12:05:23Z","level":"WARN","component":"session","message":"Keepalive timeout. Session closed."}
-```
-
-### 8.2 Prometheus metrics
-
-When `prometheus_enabled = true`, the daemon exposes metrics at:
+New Prometheus metrics for cross-domain:
 
 ```
-http://prometheus_addr:prometheus_port/metrics
+bgpx_routing_domains_active          # Count of active routing domains
+bgpx_domain_bridge_transitions_total # Total domain bridge transitions forwarded
+bgpx_cross_domain_paths_active       # Active cross-domain paths
+bgpx_mesh_island_reachable{island}   # Boolean (0/1) per island
+bgpx_bridge_pairs_active             # Count of active bridge pairs
+bgpx_cross_domain_path_table_size    # Entries in cross-domain path table
+bgpx_bridge_availability{from,to}    # Bridge pair availability (0/1)
 ```
 
-Key metrics exposed:
-
-```
-# HELP bgpx_sessions_active Current number of active sessions
-# TYPE bgpx_sessions_active gauge
-bgpx_sessions_active 42
-
-# HELP bgpx_packets_relayed_total Total packets relayed
-# TYPE bgpx_packets_relayed_total counter
-bgpx_packets_relayed_total 1428571
-
-# HELP bgpx_bytes_relayed_total Total bytes relayed
-# TYPE bgpx_bytes_relayed_total counter
-bgpx_bytes_relayed_total 10737418240
-
-# HELP bgpx_handshake_total Total handshakes by result
-# TYPE bgpx_handshake_total counter
-bgpx_handshake_total{result="success"} 423
-bgpx_handshake_total{result="timeout"} 2
-bgpx_handshake_total{result="invalid"} 0
-
-# HELP bgpx_dht_routing_table_size Current size of DHT routing table
-# TYPE bgpx_dht_routing_table_size gauge
-bgpx_dht_routing_table_size 342
-
-# HELP bgpx_reputation_blacklisted_nodes Currently blacklisted nodes
-# TYPE bgpx_reputation_blacklisted_nodes gauge
-bgpx_reputation_blacklisted_nodes 2
-```
+All existing metrics retained.
 
 ---
 
-## 9. Operational Procedures
+## 11. Deployment Checklist
 
-### 9.1 Initial deployment checklist
-
-Before going live, verify:
-
-- [ ] Node private key generated and backed up securely
-- [ ] Configuration file complete and validated (`bgpx-node --config-check`)
-- [ ] Firewall rules applied
-- [ ] systemd service file installed and hardened
-- [ ] Public IP and port are reachable from the internet
-- [ ] If exit node: exit policy reviewed, operator contact set, exit policy signed
-- [ ] If exit node: legal review of exit policy and jurisdiction completed
-- [ ] Prometheus monitoring configured (if applicable)
-- [ ] Log rotation configured (logrotate or equivalent)
-- [ ] Backup procedure for `/var/lib/bgpx/` tested
-
-### 9.2 Advertisement verification
-
-After startup, verify the node advertisement was published successfully:
-
-```bash
-bgpx-cli advertisement status
-# Output:
-# Status: published
-# NodeID: a3f2...b9c1
-# Roles: relay, entry
-# Signed at: 2026-04-24T12:00:00Z
-# Expires at: 2026-04-25T12:00:00Z
-# DHT storage nodes reached: 18
-```
-
-To retrieve the published advertisement from the DHT (as a client would see it):
-
-```bash
-bgpx-cli advertisement verify --node-id a3f2...b9c1
-# Fetches the advertisement from the DHT and validates the signature
-```
-
-### 9.3 Routine maintenance
-
-| Task | Frequency | Command |
-|---|---|---|
-| Check node status | Daily | `bgpx-cli status` |
-| Review error logs | Daily | `journalctl -u bgpx-node --since yesterday` |
-| Check reputation stats | Weekly | `bgpx-cli stats --window 168h` |
-| Verify advertisement | Weekly | `bgpx-cli advertisement verify --self` |
-| Apply software updates | Per release | `systemctl restart bgpx-node` after update |
-| Back up key and data | Weekly | Back up `/etc/bgpx/` and `/var/lib/bgpx/` |
+Before going live:
+- [ ] Node private key generated and securely backed up
+- [ ] Configuration complete and validated (`bgpx-node --config-check`)
+- [ ] Firewall rules applied (UDP 7474 open)
+- [ ] systemd service installed with hardening
+- [ ] Public IP and port reachable from internet
+- [ ] If exit node: exit policy reviewed, operator contact set, DoH configured, ECH tested
+- [ ] If bridge node: both routing_domains configured, bridge pair validated
+- [ ] If mesh island gateway: island_id chosen (unique), MESH_ISLAND_ADVERTISE publishing verified
+- [ ] Pool memberships configured (if applicable)
+- [ ] Prometheus monitoring configured
+- [ ] Log rotation configured
+- [ ] Backup procedure tested for `/var/lib/bgpx/`
+- [ ] Pool curator key backed up separately (if pool curator)
