@@ -2,294 +2,173 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the congestion control mechanisms used in the BGP-X data plane to manage bandwidth, prevent queue buildup, and maintain quality of service across multi-hop paths.
-
 ---
 
 ## 1. Overview
 
-Congestion control in BGP-X is challenging for several reasons unique to overlay networks:
-
-- **Opaque intermediate hops**: The client cannot directly observe congestion at relay nodes — it can only infer it from end-to-end measurements
-- **Multi-hop path**: Congestion at any single hop affects the entire path, but the client cannot pinpoint which hop is bottlenecked
-- **Privacy constraints**: Congestion feedback signals must not leak information about the traffic being carried
-- **Latency amplification**: In a 4-hop path, a 50ms queuing delay at each hop produces 200ms of additional latency
-
-BGP-X congestion control uses a combination of:
-
-1. **End-to-end rate control** at the client (stream-level pacing)
-2. **Per-node backpressure** signaling from relay to client
-3. **Path quality monitoring** with automatic path rebuilding when congestion is severe
+BGP-X congestion control extends to cross-domain paths. The domain identifier in PATH_QUALITY_REPORT enables clients to identify congestion by routing domain segment, enabling domain-level path rebuilds rather than full path rebuilds.
 
 ---
 
-## 2. Congestion Detection
+## 2. Congestion Detection (Domain-Aware)
 
-### 2.1 Client-side detection
+### Client-Side Detection
 
-The client detects congestion through:
+**RTT increase** via KEEPALIVE timing:
 
-#### Round-trip latency increase
+```python
+def get_congestion_baseline(path):
+    max_latency_domain = max(
+        path.domain_segments,
+        key=lambda seg: get_domain_baseline_latency(seg.domain)
+    )
+    return get_domain_baseline_latency(max_latency_domain.domain)
 
-The client measures the round-trip time (RTT) of KEEPALIVE exchanges. Sustained RTT increase indicates queuing along the path.
+def get_domain_baseline_latency(domain):
+    if domain.type == "clearnet":   return 200   # ms
+    if domain.type == "wifi_mesh":  return 50    # ms
+    if domain.type == "lora":       return 5000  # ms (LoRa is inherently high latency)
+    if domain.type == "satellite":  return 600   # ms (GEO) or 50ms (LEO)
+    return 200  # Default
 
-```
-if moving_average_rtt > 2.0 × baseline_rtt:
-    trigger_congestion_event(MILD)
-
-if moving_average_rtt > 4.0 × baseline_rtt:
-    trigger_congestion_event(SEVERE)
-```
-
-Baseline RTT is established during the first 10 KEEPALIVE exchanges after path construction.
-
-#### Packet loss
-
-Packet loss is inferred from gaps in the return-path sequence number space:
-
-```
-if loss_rate_30s > 0.02:  # 2%
-    trigger_congestion_event(MILD)
-
-if loss_rate_30s > 0.10:  # 10%
-    trigger_congestion_event(SEVERE)
+# MILD congestion trigger: measured_rtt > 2.0 × baseline
+# SEVERE congestion trigger: measured_rtt > 4.0 × baseline
 ```
 
-#### Transmission timeout
+Using domain-specific baselines prevents false SEVERE triggers on paths with LoRa segments.
 
-If a stream does not receive an acknowledgment within the expected window:
-
+**Packet loss** via sequence number gaps:
 ```
-timeout = max(200ms, 4 × moving_average_rtt)
-
-if stream.time_since_last_ack > timeout:
-    trigger_congestion_event(TIMEOUT)
+MILD if loss_rate_30s > 2%
+SEVERE if loss_rate_30s > 10%
 ```
 
-### 2.2 Node-side detection
+### Node-Side Detection and Signaling
 
-Relay nodes detect local congestion through output queue depth:
-
+Relay nodes detect congestion via output queue depth:
 ```
-if output_queue_depth > 0.75 × MAX_QUEUE_DEPTH:
-    send_backpressure_signal(level=MILD)
-
-if output_queue_depth > 0.90 × MAX_QUEUE_DEPTH:
-    send_backpressure_signal(level=SEVERE)
-    begin_tail_drop()
+output_queue_depth > 75% of MAX_QUEUE_DEPTH → congestion_flag = MILD
+output_queue_depth > 90% → SEVERE; begin tail drop
+output_queue_depth < 50% → CLEAR
 ```
 
-### 2.3 Backpressure signaling
-
-Relay nodes signal congestion back toward the client using a lightweight mechanism embedded in the RELAY packet flags field:
-
-| Flag Bit | Name | Meaning |
-|---|---|---|
-| 8 | CONGESTION_MILD | Node queue above 75% capacity |
-| 9 | CONGESTION_SEVERE | Node queue above 90% capacity |
-| 10 | CONGESTION_CLEAR | Congestion resolved (queue below 50%) |
-
-These flags are set in the flags field of the layer header (visible only after decryption at the appropriate hop — the client sees these via the return path).
-
-**Privacy note**: Congestion flags are encrypted within the onion layers and are not visible to outside observers. They do not leak information about traffic content or path structure.
+PATH_QUALITY_REPORT (now including domain_id) carries the signal to the client. Intermediate relays and bridge nodes forward opaquely — congestion signals do not leak path composition to any observer.
 
 ---
 
-## 3. Congestion Response
+## 3. Domain-Level Congestion Identification
 
-### 3.1 Client congestion response by severity
+```python
+def identify_congested_domain(pqr_reports):
+    for report in pqr_reports:
+        if report.congestion_flag == SEVERE:
+            return report.domain_id  # Pinpoints which domain
 
-#### MILD congestion
+    for report in pqr_reports:
+        if report.congestion_flag == MILD:
+            return report.domain_id
 
-```
-action:
-  - Reduce send rate by 20% (multiplicative decrease)
-  - Hold reduced rate for minimum 5 seconds before increasing
-  - Log congestion event (without session identifiers)
-```
-
-#### SEVERE congestion
-
-```
-action:
-  - Reduce send rate by 50%
-  - Pause new stream openings for 10 seconds
-  - Begin evaluating path quality for rebuild
-  - If SEVERE sustained for > 30 seconds: trigger path rebuild
+    return None  # No congestion
 ```
 
-#### TIMEOUT congestion
+---
+
+## 4. Congestion Response
+
+### MILD Congestion
+- Reduce send rate by 20% (multiplicative decrease)
+- Hold reduced rate for minimum 5 seconds before increasing
+- Log congestion event (no session identifiers)
+
+### SEVERE Congestion
+- Reduce send rate by 50%
+- Pause new stream openings for 10 seconds
+- Evaluate path quality for rebuild
+- If SEVERE sustained for >30 seconds: trigger path rebuild
+
+### Domain-Level Rebuild Decision
 
 ```
-action:
-  - Halt transmission immediately
-  - Wait for RTT measurement to stabilize
-  - If RTT stabilizes: resume at 25% of pre-congestion rate
-  - If RTT does not stabilize within 60 seconds: rebuild path
+if congested_domain.type == "mesh":
+    → attempt mesh segment rebuild only
+    → keep clearnet segments intact if possible
+
+if congested_domain.type == "clearnet" (intermediate segment):
+    → attempt clearnet segment rebuild
+    → keep mesh segments intact if possible
+
+if congested at bridge position:
+    → select alternative bridge node for same domain transition
+    → rebuild segments on both sides if needed
+
+if overall quality < 0.20 regardless of domain:
+    → immediate full path rebuild
 ```
 
-### 3.2 Rate recovery
+### Rate Recovery
 
-After congestion clears (CONGESTION_CLEAR signal or sustained low RTT), the send rate recovers using additive increase:
-
+After congestion clears:
 ```
 every RTT without congestion:
-    send_rate += ADDITIVE_INCREASE_STEP
+    send_rate += min(10% of current_rate, 1 Mbps)
+    send_rate = min(send_rate, max_configured_rate)
+```
 
-ADDITIVE_INCREASE_STEP = min(
-    10% of current_send_rate,
-    1 Mbps
+---
+
+## 5. Cover Traffic and Congestion (Domain-Aware)
+
+```
+cover_traffic_rate[domain] = max(
+    MIN_COVER_RATE_FOR_DOMAIN[domain],
+    target_cover_rate × (1 - congestion_level_in_domain)
 )
 
-send_rate = min(send_rate, max_configured_rate)
+MIN_COVER_RATE:
+  clearnet:  10 Kbps
+  wifi_mesh: 5 Kbps
+  lora:      0 Kbps  (duty cycle is already the binding constraint)
 ```
 
-This is similar to TCP AIMD (Additive Increase, Multiplicative Decrease) but adapted for the overlay context.
+Cover traffic uses session_key (not a separate key). Applies identically in all domains.
 
 ---
 
-## 4. Stream-Level Pacing
+## 6. Effective Bandwidth for Cross-Domain Paths
 
-Individual streams are paced to avoid bursty transmission that causes queuing at relay nodes.
-
-### 4.1 Token bucket pacing
-
-Each stream uses a token bucket for rate limiting:
-
-```
-bucket_capacity    = 2 × RTT × send_rate  # Burst allowance = 2 RTT worth of data
-token_refill_rate  = send_rate
-token_consumption  = packet_size per packet
-```
-
-Packets are held until sufficient tokens are available. This prevents large bursts that would fill relay queues.
-
-### 4.2 Inter-packet gap
-
-For latency-sensitive streams, an explicit inter-packet gap can be configured:
-
-```
-gap_ms = (packet_size_bytes × 8) / (send_rate_bps / 1000)
-```
-
----
-
-## 5. Multi-Stream Bandwidth Sharing
-
-When multiple streams share a single path, bandwidth is shared fairly using a weighted fair queue (WFQ) at the client.
-
-### 5.1 Default weights
-
-All streams have equal weight by default. Applications can request higher or lower weight via the SDK.
-
-### 5.2 Scheduling algorithm
-
-```
-function select_next_packet_to_send(streams):
-
-    # Find stream with largest deficit (WFQ)
-    selected_stream = None
-    max_deficit = -infinity
-
-    for stream in active_streams:
-        stream.deficit += stream.weight × quantum
-        if stream.has_data() and stream.deficit > max_deficit:
-            max_deficit = stream.deficit
-            selected_stream = stream
-
-    if selected_stream:
-        packet = selected_stream.dequeue_packet()
-        selected_stream.deficit -= packet.size
-        return packet
-```
-
----
-
-## 6. Path Quality Scoring
-
-The congestion control module maintains a real-time path quality score used to decide when to rebuild a path:
-
-```
-quality_score = (
-    0.50 × latency_score(current_rtt, baseline_rtt) +
-    0.30 × loss_score(current_loss_rate) +
-    0.20 × throughput_score(current_throughput, target_throughput)
-)
-```
-
-Where:
-
-```
-latency_score(rtt, baseline) = max(0, 1 - (rtt - baseline) / (5 × baseline))
-loss_score(loss_rate) = max(0, 1 - (loss_rate / 0.20))
-throughput_score(actual, target) = min(1, actual / target)
-```
-
-Score range: [0.0, 1.0]
-
-Path rebuild triggers:
-
-| Quality Score | Action |
-|---|---|
-| >= 0.80 | No action (healthy) |
-| 0.50–0.80 | Log warning, monitor closely |
-| 0.20–0.50 | Begin pre-building replacement path |
-| < 0.20 | Immediate path rebuild |
-
----
-
-## 7. Cover Traffic and Congestion
-
-When cover traffic is enabled, it competes for bandwidth with real traffic. The congestion control module adjusts cover traffic generation based on available capacity:
-
-```
-cover_traffic_rate = max(
-    MIN_COVER_RATE,
-    min(
-        MAX_COVER_RATE,
-        target_cover_rate × (1 - congestion_level)
+```python
+def compute_effective_bandwidth(path):
+    return min(
+        estimate_segment_bandwidth(seg)
+        for seg in path.domain_segments
     )
-)
-
-MIN_COVER_RATE = 10 Kbps    # Always send some cover traffic
-MAX_COVER_RATE = 1 Mbps     # Cap cover traffic impact
-target_cover_rate = 100 Kbps  # Default target
 ```
 
-During SEVERE congestion, cover traffic rate is reduced to MIN_COVER_RATE to prioritize real traffic.
+The effective throughput of a cross-domain path is limited by the bottleneck segment. For a path through clearnet (1 Gbps) + LoRa mesh (50 Kbps), effective bandwidth is 50 Kbps. Congestion control rate must not exceed the bottleneck.
 
 ---
 
-## 8. Bandwidth Limits and Fairness
+## 7. Stream-Level Pacing (Unchanged)
 
-### 8.1 Node-level bandwidth limiting
-
-Relay nodes enforce per-session bandwidth limits to prevent a single client from monopolizing the node's capacity:
-
-```
-max_bandwidth_per_session = total_node_bandwidth / max(active_sessions, 10)
-max_bandwidth_per_session = min(max_bandwidth_per_session, 100 Mbps)
-```
-
-This ensures fairness among clients sharing a relay node.
-
-### 8.2 Total node bandwidth cap
-
-Node operators set a total bandwidth cap in configuration. The node monitors total throughput and sends CONGESTION_SEVERE signals when approaching 90% of the cap.
+Per-stream token bucket rate limiting, inter-packet gap calculation, WFQ scheduling — all unchanged. Domain-agnostic.
 
 ---
 
-## 9. Metrics
+## 8. LoRa Duty Cycle as Hard Bandwidth Cap
+
+LoRa duty cycle limits (1% in EU) act as a hard bandwidth cap independent of congestion control. BGP-X automatically respects duty cycle limits via token bucket. When duty cycle is reached: transmission pauses; streams enter PAUSED state; resume when duty cycle resets.
+
+---
+
+## 9. Metrics (Updated)
 
 | Metric | Description |
 |---|---|
-| `current_rtt_ms` | Current measured round-trip time |
-| `baseline_rtt_ms` | Baseline RTT established at path creation |
-| `packet_loss_rate` | 30-second rolling packet loss rate |
-| `send_rate_mbps` | Current paced send rate |
-| `path_quality_score` | Current path quality score (0.0–1.0) |
-| `congestion_events_total` | Total congestion events since path creation |
-| `path_rebuilds_total` | Total path rebuilds since client start |
-| `cover_traffic_rate_kbps` | Current cover traffic send rate |
-
-All metrics are scoped to paths and streams — no user-identifying information is included.
+| current_rtt_ms | Current measured round-trip time |
+| baseline_rtt_ms | Domain-calibrated baseline at path creation |
+| path_quality_score | Current overall score (0.0-1.0) |
+| congestion_events_total | Total congestion events |
+| domain_congestion_by_segment | Which domain segment shows congestion |
+| cover_traffic_rate_kbps_by_domain | Current cover rate per domain |
+| bottleneck_domain | Current bandwidth-limiting domain segment |
+| lora_duty_cycle_remaining_pct | LoRa duty cycle remaining (mesh paths) |
