@@ -2,249 +2,269 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the BGP-X reputation system — the mechanism by which node reliability, honesty, and performance are tracked over time and used to influence path selection.
-
 ---
 
-## 1. Overview
+## 1. Overview and Design Principles
 
-The BGP-X reputation system serves two purposes:
+The BGP-X reputation system is a dual-layer system:
 
-1. **Path quality**: Prefer nodes that are reliable, fast, and available
-2. **Security**: Detect and penalize nodes exhibiting malicious or unreliable behavior
+**Layer 1 (Primary): Local Reputation** — based entirely on this client's own observations. Authoritative. Never shared in identifiable form.
 
-The reputation system is **client-local by default** — each client maintains its own reputation scores based on its own observations. A distributed reputation aggregation layer is a planned extension.
+**Layer 2 (Advisory): Global Reputation** — aggregated observations from other nodes and clients. Advisory only. Does NOT automatically affect path selection. Opt-in enforcement.
 
-Reputation scores are used by the routing algorithm as one factor in node scoring (15% weight by default). They do not override mandatory constraints — a node with a perfect reputation score that fails a diversity constraint is still excluded.
+### Non-Negotiable Rules
+
+- Path composition NEVER shared
+- Per-hop timing NEVER shared in identifiable form
+- path_id NEVER shared
+- Session identifiers NEVER shared
+- Client IP addresses NEVER shared
+- Traffic volume per path NEVER shared
+- Pool query history NEVER shared
+- Cross-domain traversal details NEVER shared
+- Global blacklists are advisory by default — no automatic exclusion unless explicitly enabled
 
 ---
 
 ## 2. Reputation Score
 
-Each node in the client's node database has a `reputation_score` in the range [0.0, 100.0].
+Each node in the client's node database has a `reputation_score` in range [0.0, 100.0].
 
-### 2.1 Initial score
+Initial score for new, unseen nodes: **60.0** (neutral)
 
-New nodes (never used before) start with a neutral score:
-
-```
-initial_reputation_score = 60.0
-```
-
-This allows new nodes to be used while their track record is established, without treating all unproven nodes as suspect.
-
-### 2.2 Score bounds
-
-- Minimum: 0.0 (blacklist threshold below this)
-- Maximum: 100.0
-- Blacklist threshold: below 15.0 after at least 10 observations
+Blacklist threshold: below **15.0** after at least 10 observations.
 
 ---
 
-## 3. Reputation Events
+## 3. Local Reputation Events
 
-Reputation events are observations that modify a node's score. Events are weighted and applied as increments or decrements to the current score.
-
-### 3.1 Positive events
+### Positive Events
 
 | Event | Score Change | Description |
 |---|---|---|
-| RELAY_SUCCESS | +0.5 | A packet was successfully relayed through this node |
-| KEEPALIVE_SUCCESS | +0.2 | Node responded to a KEEPALIVE within expected latency |
+| RELAY_SUCCESS | +0.5 | Packet successfully relayed through this node |
+| KEEPALIVE_SUCCESS | +0.2 | Node responded to KEEPALIVE within expected latency |
 | HANDSHAKE_SUCCESS | +1.0 | Handshake completed successfully |
-| LATENCY_WITHIN_ADVERTISED | +0.3 | Measured latency is within 150% of advertised latency |
-| BANDWIDTH_WITHIN_ADVERTISED | +0.3 | Measured throughput is within 50% of advertised bandwidth |
-| UPTIME_CONSISTENT | +0.5 | Node is available when its advertisement indicates it should be |
+| LATENCY_WITHIN_ADVERTISED | +0.3 | Measured latency ≤ 150% of advertised |
+| BANDWIDTH_WITHIN_ADVERTISED | +0.3 | Measured throughput ≥ 50% of advertised |
+| UPTIME_CONSISTENT | +0.5 | Node available when advertisement indicates it should be |
+| GEO_PLAUSIBLE | +0.3 | RTT consistent with claimed region |
+| CLEAN_WITHDRAWAL | 0 | Node properly published NODE_WITHDRAW before going offline |
+| DOMAIN_BRIDGE_SUCCESS | +0.5 | Successfully bridged traffic between two routing domains |
+| MESH_ISLAND_STABLE | +0.3 | Mesh island consistently reachable via this bridge node |
+| BRIDGE_LOW_LATENCY | +0.3 | Bridge transition latency within advertised range |
 
-### 3.2 Negative events
+### Negative Events
 
 | Event | Score Change | Description |
 |---|---|---|
-| RELAY_FAILURE | -2.0 | A packet sent through this node was not forwarded (timeout) |
-| KEEPALIVE_TIMEOUT | -3.0 | Node did not respond to KEEPALIVE within 90 seconds |
+| RELAY_FAILURE | -2.0 | Packet sent through node not forwarded (timeout) |
+| KEEPALIVE_TIMEOUT | -3.0 | Node didn't respond to KEEPALIVE within 90 seconds |
 | HANDSHAKE_FAILURE | -5.0 | Handshake failed (timeout or invalid response) |
-| LATENCY_EXCEEDED | -1.0 | Measured latency exceeds 200% of advertised latency |
-| ADVERTISEMENT_INCONSISTENCY | -5.0 | ASN or country in advertisement inconsistent with observed routing |
-| PROTOCOL_VIOLATION | -10.0 | Node sent a protocol-invalid message |
+| LATENCY_EXCEEDED | -1.0 | Measured latency > 200% of advertised |
+| ADVERTISEMENT_INCONSISTENCY | -5.0 | ASN or country inconsistent with observed routing |
+| PROTOCOL_VIOLATION | -10.0 | Node sent protocol-invalid message |
 | SUSPICIOUS_BEHAVIOR | -15.0 | Behavior pattern matches known attack signatures |
+| GEO_SUSPICIOUS | -1.5 | RTT 1.5-2× expected for claimed region |
+| GEO_IMPLAUSIBLE | -3.0 | RTT 2-3× expected for claimed region |
+| PROTOCOL_VIOLATION_GEO | -10.0 | ≥3 GEO_IMPLAUSIBLE events within 7 days |
+| ECH_CAPABLE_BUT_FAILING | -2.0 | Node claims ECH capability but consistently fails ECH negotiation |
+| WITHDRAWAL_WITHOUT_NOTICE | -1.0 | Node went offline without publishing NODE_WITHDRAW |
+| DOMAIN_BRIDGE_FAILURE | -3.0 | Domain bridge failed (timeout; couldn't reach other domain) |
+| MESH_ISLAND_UNREACHABLE | -2.0 | Mesh island became unreachable via this bridge node |
+| BRIDGE_LATENCY_EXCEEDED | -1.0 | Bridge transition latency > 200% of advertised value |
+| BRIDGE_CLAIMED_AVAILABLE_OFFLINE | -4.0 | Node advertised bridge as available but couldn't deliver |
+| FAKE_DOMAIN_ADVERTISEMENT | -15.0 | Node claimed domain endpoint it cannot actually reach |
 
-### 3.3 Score decay
+### Score Decay
 
-Reputation scores decay toward the neutral value (60.0) over time at a rate of 0.1 points per hour. This ensures:
-
-- A node that was excellent years ago but has deteriorated does not retain its high score indefinitely
-- A node that recovered from a bad period is not permanently penalized
+Scores decay toward neutral (60.0) over time:
 
 ```
-score_at_time_t = 60.0 + (score_at_time_0 - 60.0) × exp(-λ × t)
-λ = 0.1 / 3600  # decay constant (per second)
+score_t = 60.0 + (score_0 - 60.0) × exp(-λ × t)
+λ = 0.1 / 3600  # decay per second
 ```
 
----
-
-## 4. Blacklisting
-
-A node is blacklisted when:
-
-1. Its reputation score falls below **15.0** AND it has at least **10 observations**, OR
-2. A SUSPICIOUS_BEHAVIOR event is recorded (immediate blacklist regardless of score), OR
-3. A cryptographic violation is observed (e.g., packet authentication failure that indicates active manipulation), OR
-4. The node is included in a signed blacklist record published to the DHT
-
-### 4.1 Blacklist effects
-
-- The node is excluded from all path construction
-- The node's advertisement is not propagated by this client's DHT node
-- A blacklist record MAY be published to the DHT (see Section 6)
-
-### 4.2 Blacklist duration
-
-- Reputation-based blacklists: 30 days minimum, then eligible for re-evaluation if fresh advertisement is published
-- Cryptographic violation blacklists: permanent (never re-evaluated)
-- Signed community blacklists: duration specified in the blacklist record
+This ensures historically excellent nodes that deteriorate lose their high score, and recovering nodes are not permanently penalized.
 
 ---
 
-## 5. Observation Collection
+## 4. Per-Domain Reputation Tracking
 
-### 5.1 What is observed
+Domain bridge nodes may serve multiple routing domains. Reputation events are tagged with the relevant domain:
 
-The reputation system collects observations only from the client's own use of nodes. Observations are:
+```rust
+struct ReputationEvent {
+    event_type:   ReputationEventType,
+    domain:       Option<DomainId>,    // Which domain this event relates to
+    timestamp:    Timestamp,
+    score_change: f32,
+}
+```
 
-- Whether KEEPALIVE responses arrive on time
-- Whether handshakes complete successfully
-- Path latency measurements (before and after each relay hop, inferred from timing)
-- Whether the path delivered data successfully (session completion)
-
-### 5.2 What is NOT observed
-
-- Content of relayed traffic
-- Session identifiers from other clients
-- DHT query behavior
-
-### 5.3 Observation attribution
-
-Observations are attributed to the node that caused the event, as determined by the client's knowledge of path construction:
-
-- A timeout at hop 2 attributes the KEEPALIVE_TIMEOUT to the node at hop 2
-- A successful relay attributes RELAY_SUCCESS to all nodes in the path
-- A handshake failure attributes HANDSHAKE_FAILURE to the specific node the handshake was attempted with
+When a bridge node has poor reliability for its mesh domain but good reliability for clearnet relaying, the per-domain event record helps clients identify which role is problematic. Per-domain adjustment is used only for bridge node selection scoring, not for overall reputation score computation.
 
 ---
 
-## 6. Distributed Reputation (Planned Extension)
+## 5. Blacklisting
 
-The base reputation system is fully local. A planned extension adds distributed reputation aggregation.
+### Automatic Blacklist Triggers
 
-### 6.1 Reputation records
+1. `reputation_score < 15.0` AND `observation_count >= 10`
+2. `SUSPICIOUS_BEHAVIOR` event recorded (immediate, regardless of score)
+3. Cryptographic violation detected (active MITM attempt, forged authentication tags)
+4. Persistent `FAKE_DOMAIN_ADVERTISEMENT` events (≥3 occurrences in 7 days): permanent blacklist
+5. Persistent `BRIDGE_CLAIMED_AVAILABLE_OFFLINE` (≥5 occurrences): temporary blacklist (30 days)
+6. Node in signed global blacklist with 3+ independent reporters AND local observations confirm (if enforce_global_blacklist = true)
 
-Nodes publish signed reputation records to the DHT:
+### Blacklist Effects
+
+- Node excluded from all path construction
+- Node's advertisement not propagated by this client's DHT node
+- May publish blacklist record to DHT (see Section 6)
+
+### Local Blacklist Expiry
+
+| Type | Default Duration | Behavior |
+|---|---|---|
+| Reputation-based | 30 days | Re-evaluated at expiry |
+| Manual operator | Configurable | Cleared via Control API |
+| Cryptographic violation | Permanent | Never re-evaluated |
+| Fake domain advertisement | Permanent | Never re-evaluated |
+| Community blacklist (opt-in) | Per record (max 30 days) | Re-evaluated at expiry |
+
+---
+
+## 6. Global Reputation (Advisory Layer)
+
+### Global Record Format
 
 ```json
 {
   "version": 1,
-  "reporter_id": "<NodeID of reporting node>",
-  "subject_id": "<NodeID of node being rated>",
-  "score": 75.5,
+  "reporter_id": "<reporting NodeID>",
+  "subject_id": "<subject NodeID>",
+  "score": 72.5,
   "observation_count": 142,
   "observation_period_days": 30,
   "events_summary": {
     "relay_success": 1240,
     "keepalive_timeout": 3,
-    "handshake_failure": 0
+    "handshake_failure": 0,
+    "geo_suspicious": 0,
+    "domain_bridge_failure": 1
   },
   "signed_at": "2026-04-24T12:00:00Z",
   "signature": "<Ed25519 signature of reporter_id>"
 }
 ```
 
-### 6.2 Aggregation policy
+### Advisory-Only Default
 
-When consuming distributed reputation data:
+By default, global reputation records are:
+- Fetched and stored
+- Displayed in monitoring tools
+- Used to increase local observation frequency on suspicious nodes
+- NOT used to automatically exclude nodes from paths
 
-- Weight each record by the reporter's own reputation score (circular reference handled by bootstrapping from local observations)
-- Apply a skepticism discount (distributed reports are trusted less than local observations)
-- Ignore reports from nodes with reputation < 50 (to prevent Sybil reputation attacks)
-- Cap the influence of distributed reputation at 30% of the final score (local observations dominate)
+### Opt-In Global Enforcement
 
-### 6.3 Sybil resistance for distributed reputation
+```toml
+[reputation]
+enforce_global_blacklist = true  # Default: false
+```
 
-A Sybil attacker who creates many fake reporter nodes cannot effectively manipulate reputation because:
+When enabled: global blacklist records from 3+ independent reporters with local observation confirmation trigger local blacklisting.
 
-- Each reporter's influence is weighted by their own reputation
-- New nodes start at neutral reputation (60.0) and earn influence slowly
-- The local observation component (70% weight) cannot be manipulated by remote reports
+### Global Aggregation Policy
+
+- Weight each record by reporter's own local reputation score
+- Apply skepticism discount: global records weighted at 30% maximum of final score
+- Ignore reports from reporters with reputation < 50
+- Local observations (70% weight) always dominate
+- Local observations always win in conflicts
 
 ---
 
-## 7. Blacklist Records (DHT-Published)
+## 7. Global Blacklist Records
 
-Signed blacklist records allow one node to warn others about malicious behavior.
+Signed records published to DHT to warn others:
 
 ```json
 {
   "version": 1,
   "record_type": "blacklist",
-  "subject_id": "<NodeID of malicious node>",
+  "subject_id": "<NodeID>",
   "reason": "active_mitm",
   "evidence_hash": "<BLAKE3 hash of supporting evidence>",
   "duration_hours": 720,
-  "reporter_id": "<NodeID of reporting node>",
+  "reporter_id": "<NodeID of reporter>",
   "signed_at": "2026-04-24T12:00:00Z",
-  "signature": "<Ed25519 signature of reporter_id>"
+  "signature": "<Ed25519 signature>"
 }
 ```
 
-#### Reason codes
+### Reason Codes
 
 | Code | Description |
 |---|---|
-| `keepalive_failure` | Node consistently fails to respond to KeepalIves |
-| `handshake_failure` | Node consistently fails handshakes |
+| `keepalive_failure` | Consistently fails to respond to KeepalIves |
+| `handshake_failure` | Consistently fails handshakes |
 | `active_mitm` | Evidence of active traffic manipulation |
-| `advertisement_fraud` | ASN/country misrepresentation |
+| `advertisement_fraud` | ASN/country/domain misrepresentation |
 | `protocol_violation` | Systematic protocol violations |
-| `exit_policy_violation` | Gateway violating its signed exit policy |
-
-### 7.1 Blacklist record acceptance policy
-
-Clients accept blacklist records only if:
-
-- The reporter's local reputation score is >= 70.0
-- The record is from the past 72 hours
-- The signature is valid
-- The reason code is known
-- At least 3 independent reporters have published blacklist records for the same subject with compatible reasons (Sybil resistance)
-
-A single blacklist record does not trigger automatic blacklisting. It triggers enhanced monitoring (more frequent KEEPALIVE checks, mandatory handshake verification).
+| `exit_policy_violation` | Gateway violating signed exit policy |
+| `geo_implausibility` | Persistent geographic plausibility failure |
+| `fake_domain_bridge` | Claims bridge capability it cannot deliver |
+| `mesh_island_fraud` | False mesh island membership claims |
 
 ---
 
-## 8. Reputation Persistence
+## 8. Pool-Related Reputation
 
-The client's reputation database MUST be persisted to disk across restarts.
+Pool curators with many blacklisted members accumulate reputation penalties:
 
-Storage format:
-- Encrypted with a key derived from the client's long-term identity
-- JSON or binary serialization (implementation choice)
-- Backed up before modification (atomic write via temp file + rename)
-
-On startup:
-- Load reputation database
-- Decay all scores based on time elapsed since last run
-- Remove nodes whose advertisements have expired AND whose last-seen time is > 30 days ago
+| Condition | Score Change |
+|---|---|
+| >20% of pool members blacklisted | Curator reputation -5.0 per occurrence |
+| >50% of pool members blacklisted | Curator reputation -10.0 per occurrence |
+| Domain-bridge pool with >50% unavailable bridges | Curator reputation -5.0 per occurrence |
 
 ---
 
-## 9. Reputation System Metrics
+## 9. Reputation Persistence
+
+Location: `data_dir/reputation.db`. Encrypted with key derived from client's long-term identity. Atomic writes (temp file + rename).
+
+On startup: load database, apply decay based on elapsed time since last run, remove expired entries.
+
+On shutdown: flush reputation database to disk.
+
+---
+
+## 10. What Is NEVER Shared
+
+All prohibited items from Section 1, plus:
+- Which routing domains a specific session traversed
+- Cross-domain path composition
+- Mesh island identifiers associated with specific sessions
+- Per-connection domain bridge transition records
+- Domain-specific timing correlation data
+
+---
+
+## 11. Metrics
 
 | Metric | Description |
 |---|---|
-| `nodes_by_reputation_bucket` | Count of nodes in each reputation range (0–20, 20–40, 40–60, 60–80, 80–100) |
-| `blacklisted_node_count` | Total blacklisted nodes |
-| `positive_events_per_hour` | Rate of positive reputation events |
-| `negative_events_per_hour` | Rate of negative reputation events |
-| `distributed_reports_received` | Count of distributed reputation records received |
-| `distributed_reports_accepted` | Count accepted after validation |
+| nodes_by_reputation_bucket | Count per range (0-20, 20-40, 40-60, 60-80, 80-100) |
+| blacklisted_node_count | Total currently blacklisted |
+| positive_events_per_hour | Rate of positive reputation events |
+| negative_events_per_hour | Rate of negative reputation events |
+| geo_suspicious_events_per_hour | Geographic plausibility events |
+| domain_bridge_failure_events_per_hour | Domain bridge failure events |
+| global_reports_received | Count of global records received |
+| global_reports_accepted | Count accepted after validation |
+| pool_curator_reputation_by_pool | Curator reputation per pool |
 
-No node identifiers are included in published metrics.
+No node identifiers in published metrics.
