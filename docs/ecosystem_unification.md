@@ -1,161 +1,114 @@
-# BGP-X: Ecosystem Unification
+# BGP-X: Ecosystem Unification Through Domain Routing
 
-This document explains the fragmented mesh networking ecosystem, why existing systems have failed to reach widespread adoption, and how BGP-X provides the unifying architecture.
-
----
-
-## The Fragmentation Problem
-
-The mesh networking community has built many valuable systems over the past two decades. Each solves part of the problem. None has achieved widespread adoption because each is isolated in its capabilities.
-
-When a community wants to deploy private mesh networking, they face an impossible choice:
-
-```
-Want LoRa range?                    → Meshtastic (no privacy, no clearnet)
-Want community WiFi?                → NYC Mesh (no privacy, no mesh federation)
-Want anonymity?                     → Tor (no mesh transport, internet-only)
-Want privacy over mesh?             → Reticulum (no onion routing, no clearnet)
-Want public key addressing?         → cjdns (no anonymity, no clearnet exit)
-Want ISP-free operation?            → Meshtastic or Reticulum (limited capabilities)
-Want full internet access?          → VPN (single trust point, no mesh)
-```
-
-No existing system provides all of these properties simultaneously. Every community must choose and sacrifice.
+**Version**: 0.1.0-draft
 
 ---
 
-## What Each System Provides (and Doesn't)
+## 1. The Fragmentation Problem
 
-### Capability Matrix
+The current privacy and mesh networking ecosystem is fragmented:
 
-| Feature | Meshtastic | NYC Mesh | Tor | I2P | cjdns | Reticulum | Helium | BGP-X |
-|---|---|---|---|---|---|---|---|---|
-| LoRa transport | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| WiFi mesh | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ |
-| Onion routing | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
-| Clearnet exit | ❌ | ✅ | ✅ | ⚠️ | ❌ | ❌ | ❌ | ✅ |
-| Anonymity | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
-| No ISP needed | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ |
-| Public key addressing | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Decentralized discovery | ✅ | ❌ | ❌ | ✅ | ⚠️ | ✅ | ❌ | ✅ |
-| Pool trust domains | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Router firmware | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Hardware ecosystem | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Inter-network routing | ❌ | ❌ | ❌ | ❌ | ⚠️ | ⚠️ | ❌ | ✅ |
-| ECH at exit | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+- **Tor** provides internet anonymity but cannot reach mesh island services
+- **Reticulum** provides mesh networking but has no onion-routing privacy model
+- **NYC Mesh / Freifunk** provide community internet access but isolated from other communities
+- **Meshtastic** provides LoRa mesh communication but disconnected from internet services
+- **cjdns / Yggdrasil** provide encrypted routing but no source anonymity
+
+Each system works in isolation. A Tor user cannot reach a Meshtastic-connected service. A Freifunk community in Berlin cannot communicate privately with one in Lima. A Reticulum mesh island cannot route through the Tor/I2P overlay for additional privacy.
+
+BGP-X's unification is the **routing domain model** that makes all of these first-class participants in one network.
 
 ---
 
-## BGP-X's Unique Position
+## 2. The Unification: Routing Domains
 
-BGP-X does not claim to be the first to implement any individual feature. It claims to be the first to **unify all of these features in a single coherent system with hardware targets**.
+Every BGP-X routing domain is a first-class participant in a single unified topology:
 
-**What BGP-X innovates**:
-- Pool-based trust domains with double-exit architecture
-- Clearnet exit model with signed exit policies, ECH, DoH, DNSSEC
-- Unified DHT spanning mesh and internet transports
-- Router-level deployment (all devices protected transparently)
-- Hardware platform with unified core and deployment-specific variants
+1. **No domain is secondary**: clearnet, overlay, and mesh are equals
+2. **Any domain can originate a path**: clearnet client, mesh client, satellite client — same routing algorithm
+3. **Any domain can be a destination**: services in any domain reachable from any other
+4. **Any combination** of domains can be intermediate hops — no ordering enforced
+5. **N-hop unlimited across all domains** — no protocol maximum at any level
+6. **One unified DHT**: all domains, one discovery layer, one consistent view
 
-**What BGP-X builds on**:
-- cjdns's insight that public key addressing is superior to IP addressing
-- Reticulum's validation of multi-transport mesh for low-bandwidth links
-- Tor's multi-hop onion routing model and circuit design
-- Meshtastic's demonstration of LoRa mesh hardware viability
-- NYC Mesh / Freifunk's demonstration of community WiFi mesh deployment
-- Kademlia DHT for decentralized discovery
-- Noise Protocol for the handshake model
+This is ecosystem unification — not "these systems coexist" but "these systems are one system."
 
 ---
 
-## How BGP-X Works With Existing Systems
+## 3. What Each Prior System Contributes
 
-BGP-X does not replace existing community deployments. It can layer on top of them:
+BGP-X inherits and extends:
+
+- **cjdns**: public key addressing → BGP-X NodeID model
+- **Yggdrasil**: DHT-based routing → BGP-X unified Kademlia DHT
+- **Reticulum**: multi-transport mesh → BGP-X mesh transport abstraction
+- **Tor**: onion routing → BGP-X onion encryption (domain-agnostic)
+- **I2P**: garlic routing and native service model → BGP-X SDK native services
+- **Meshtastic**: LoRa community mesh → BGP-X mesh transport + adaptation layer
+- **NYC Mesh / Freifunk**: community WiFi mesh → BGP-X OpenWrt deployment
+
+**BGP-X adds**: the domain routing layer that connects all of these into one coherent topology. The DOMAIN_BRIDGE hop type. The unified DHT spanning all domains. The domain bridge node model. The cross-domain path_id return routing. The N-hop unlimited protocol design.
+
+---
+
+## 4. How BGP-X Works With Existing Systems
 
 ### NYC Mesh / Freifunk / LibreMesh Integration
 
-These communities run OpenWrt routers — the same hardware BGP-X targets.
+BGP-X deploys as an OpenWrt package on community mesh hardware. The community's existing WiFi mesh continues to provide local connectivity. BGP-X adds:
+- Onion routing for metadata privacy
+- Cross-domain connectivity to other BGP-X mesh islands worldwide
+- Clearnet exit via pool-selected exit nodes
+- Unified DHT for service discovery across communities
 
-**Integration path**:
-1. Install BGP-X as an OpenWrt package (no hardware changes)
-2. Existing mesh routing continues unchanged
-3. BGP-X adds a privacy overlay on top of existing connectivity
-4. Community members' traffic is now onion-encrypted through the overlay
-5. DHT pool configuration enables federation with other BGP-X communities
-
-**What changes for community members**: traffic is now privately routed. The mesh itself is unchanged — BGP-X runs as additional software on the same routers.
-
-**What community gets**: privacy protection for all member traffic; federation with other BGP-X communities; coverage gap bridging via internet relay pools.
+When a community installs BGP-X with a bridge node, the coverage gap between communities is bridged via the clearnet overlay transparently. Community A in Lima and Community B in Bogotá can communicate privately through BGP-X paths that traverse clearnet between their gateways.
 
 ### Meshtastic Integration
 
-Meshtastic devices (ESP32/nRF52840) cannot run the full BGP-X daemon (too constrained). Integration via adaptation layer:
+Meshtastic hardware (ESP32 + LoRa radio) serves as a LoRa radio modem for BGP-X nodes via an adaptation layer. The Meshtastic routing protocol is replaced by BGP-X's protocol. The result: LoRa radio infrastructure running a full privacy overlay, discoverable from the unified DHT, accessible from clearnet BGP-X clients without any LoRa hardware.
 
-**Integration path**:
-1. Add a Raspberry Pi or GL.iNet router near existing Meshtastic infrastructure
-2. Connect Meshtastic device to router via USB
-3. BGP-X adaptation layer uses Meshtastic device as raw LoRa radio modem
-4. BGP-X handles all routing, encryption, and DHT via LoRa radio
-5. Meshtastic protocol is bypassed for BGP-X traffic
+### Inter-Community Routing
 
-**Hardware reuse**: same Meshtastic antennas and radios. New firmware for ESP32 that exposes raw LoRa mode for BGP-X. Meshtastic protocol can still coexist for devices not running BGP-X.
+Previously: communities using different mesh systems (Meshtastic, NYC Mesh, Freifunk) could not communicate privately with each other.
 
-### Helium Infrastructure Reuse
+With BGP-X domain routing: each community runs BGP-X with its own `island_id`. Domain bridge nodes connect each community to the BGP-X clearnet overlay. Through the unified DHT, communities discover each other. Cross-domain paths connect them through the overlay.
 
-Helium hotspots contain LoRaWAN radio hardware that could be repurposed. With modified firmware:
-
-1. Helium hotspot hardware (RAK concentrator + gateway SBC) runs BGP-X daemon
-2. LoRa radio serves BGP-X mesh transport instead of (or in addition to) LoRaWAN
-3. Helium coverage becomes BGP-X mesh coverage
-
-Note: Helium's blockchain-based incentive model is separate from BGP-X. Any economic incentive layer for BGP-X node operators is out of scope for the base protocol.
+The coverage gap between communities — previously an absolute barrier — becomes a clearnet overlay segment in a cross-domain path.
 
 ---
 
-## The Coverage Gap Bridging Solution
-
-The most significant architectural capability BGP-X provides that no existing system offers: **automatic, transparent bridging between geographically separated mesh islands via internet relay pools**.
-
-### The Problem
-
-Two communities each have functional mesh networks but cannot directly connect because they're physically separated (different cities, different countries, too far for radio).
-
-With existing systems: no connection. The communities are isolated.
-
-### The BGP-X Solution
-
-Each community deploys a gateway node (Mode 5) connecting their mesh to the internet. Each community configures a pool for their mesh nodes.
+## 5. The Coverage Gap Bridging Solution
 
 ```
-Community A (Lima) → [Pool: mesh-lima] → Gateway Lima → Internet relay pool
-                                                                │
-Community B (Bogotá) ← [Pool: mesh-bogota] ← Gateway Bogotá ←─┘
+Community A (Lima)           [Clearnet Gap]           Community B (Bogotá)
+mesh:lima-district-1    ─────────────────────    mesh:bogota-district-1
+      │                                                      │
+   Bridge A                BGP-X overlay                 Bridge B
+   (gateway)            (internet-connected             (gateway)
+                           BGP-X relays)
+
+Cross-domain path:
+  mesh:lima → Bridge A → clearnet overlay → Bridge B → mesh:bogota
 ```
 
-Gateway DHT cross-domain sync makes each community's nodes appear in the other's DHT. Path construction automatically uses the three-segment path across all pools.
-
-**What the user experiences**: connecting to a peer in the other community works just like connecting to a local mesh node. No manual configuration. No awareness of the internet bridge.
-
-**Privacy**: all traffic is onion-encrypted throughout. The internet relay nodes see only encrypted BGP-X traffic. The gateways see which segment they're connecting (but not the full path).
+The unified DHT makes both islands discoverable from each other via their bridge nodes. The path is constructed automatically by the routing algorithm.
 
 ---
 
-## Honest Competitive Positioning
+## 6. Honest Competitive Positioning
 
-BGP-X should not overclaim. The honest positioning:
+**BGP-X IS** the first to:
+- Unify onion routing + mesh transport + clearnet exit + decentralized unified DHT + pool trust domains + hardware ecosystem into one coherent system
+- Enable any-to-any cross-domain routing (clearnet ↔ mesh ↔ satellite in any combination)
+- Enable clearnet clients to reach mesh island services without any special hardware
+- Implement N-hop unlimited path construction with no protocol maximum
+- Operate a unified DHT spanning all routing domains
 
-**BGP-X IS**:
-- The first system to unify: onion routing + mesh transport + clearnet exit + decentralized DHT + pool trust domains + hardware ecosystem
-- The first to enable transparent coverage gap bridging between separated mesh islands
-- The first with router-level deployment (all devices protected without per-device configuration)
-- The first with ECH at exit nodes for domain name privacy
-- The first with pool-based trust domains enabling double-exit architecture
+**BGP-X is NOT** the first:
+- Mesh network (Reticulum, Meshtastic predate it)
+- Anonymous communication system (Tor, I2P, cjdns predate it)
+- To use public key addressing (cjdns pioneered this)
+- To support LoRa transport (Reticulum, Meshtastic predate it)
+- To provide onion routing (Tor, I2P predate it)
 
-**BGP-X is NOT**:
-- The first mesh network
-- The first anonymous communication system
-- The first to use public key addressing
-- The first to support LoRa transport
-- The first to provide onion routing
-
-**BGP-X builds on** decades of prior work by the mesh networking, anonymity, and cryptographic networking communities. The goal is to complete the picture that prior systems have each partially drawn.
+BGP-X's value is in synthesis and unification, not in any single primitive.
