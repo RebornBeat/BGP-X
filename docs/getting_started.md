@@ -1,210 +1,162 @@
-# Getting Started with BGP-X
+# BGP-X Getting Started Guide
 
-This document is your entry point to understanding, deploying, and using BGP-X. It is written for four audiences:
-
-- **Network operators** — people who want to deploy BGP-X on a router for their network
-- **Node operators** — people who want to run BGP-X relay, entry, or exit nodes
-- **Developers** — people who want to build applications using the BGP-X SDK
-- **End users** — people whose traffic is protected by a BGP-X router
+**Version**: 0.1.0-draft
 
 ---
 
-## Deployment Modes
+## 1. What You're Setting Up
 
-BGP-X supports six deployment modes. Choose the one that fits your situation:
-
-| Mode | Description | ISP Needed | Use Case |
-|---|---|---|---|
-| Dual-Stack Router | BGP + BGP-X coexist; routing policy selects per flow | Yes | Privacy with selective bypass for gaming, streaming, etc. |
-| BGP-X Only Router | All LAN traffic through overlay; no bypass | Yes (as transport) | Maximum privacy enforcement |
-| Standalone Device | BGP-X daemon on one device only | Yes | No router access; travel; development |
-| Mesh Node | No ISP; mesh radio transport only | No | Community without ISP; disaster recovery |
-| Gateway Node | Bridges mesh to clearnet internet | Yes (at gateway) | Shared internet access for mesh community |
-| Broadcast Amplifier | Range extension only; no routing | No | Extending mesh coverage |
-
-**For most households**: Dual-Stack Router or BGP-X Only Router.
-
-**For communities without reliable internet**: Mesh Node + Gateway Node.
-
-**For developers**: Standalone Device or SDK with Embedded Mode.
+BGP-X runs on your router or device and routes traffic through an onion-encrypted overlay network. No app modifications needed. All devices on your network are protected.
 
 ---
 
-## What BGP-X Provides
+## 2. Choose Your Deployment Mode
 
-BGP-X provides a **network-layer privacy overlay**. Concretely:
-
-When your traffic routes through BGP-X:
-
-- Your ISP sees only encrypted traffic to the first BGP-X relay — not your destination
-- The entry node knows your IP address but not your destination
-- The exit node knows the destination but not your IP address
-- No single party in the chain can see both ends simultaneously
-- All traffic between hops is encrypted with per-hop, per-session keys
-
-BGP-X does not make you invisible. It distributes and limits what any single party can observe.
-
----
-
-## Architecture at a Glance
-
-BGP-X is router infrastructure — it runs on your router and protects all connected devices:
-
-```
-[Phone]────┐
-[Laptop]───┼──► [BGP-X Router] ──► [BGP-X Overlay Network] ──► [Internet]
-[TV]───────┘          │
-                      │  Routing Policy Engine decides per flow:
-                      ├──► BGP-X overlay (privacy-protected)
-                      └──► Standard routing (direct, unprotected)
-```
-
-All devices connect to the router as normal. The BGP-X daemon handles everything transparently.
-
----
-
-## Who Uses What
-
-| You Are | What You Need | Configuration |
+| Mode | What You Need | What You Get |
 |---|---|---|
-| Device on LAN | Nothing — just connect to router | Zero |
-| Building a BGP-X native app | BGP-X SDK | SDK integration |
-| Managing the router | bgpx-cli or GUI | Control socket access |
-| Running a relay node | bgpx-node | Node configuration |
-| Running an exit gateway | bgpx-node + exit policy | Exit configuration + DoH/ECH |
+| **Router (Mode 1)** | OpenWrt router | All LAN devices protected |
+| **Standalone (Mode 3)** | Any Linux device | That device protected |
+| **Mesh Node (Mode 4)** | BGP-X hardware or OpenWrt + radio | ISP-free networking |
+| **Gateway (Mode 5)** | Router with internet + mesh radio | Bridge mesh island to internet |
 
 ---
 
-## Dual-Stack vs. BGP-X Only
+## 3. Quick Start (Linux Standalone)
 
-**Dual-Stack** (recommended for most):
-- Some traffic goes through BGP-X (private)
-- Some traffic goes direct (unprotected, lower latency)
-- Routing policy decides which traffic is which
-- Good for: households where some devices need low latency (gaming, smart TV)
+```bash
+# Install
+curl -fsSL https://install.bgpx.network/quick.sh | bash
 
-**BGP-X Only** (maximum privacy):
-- All LAN traffic forced through overlay
-- No bypass possible from LAN devices
-- Slightly higher latency for all traffic
-- Good for: activist networks, high-security environments, shared community networks
+# Generate identity and default config
+bgpx-node setup --output /etc/bgpx/node.toml
 
----
+# Edit config: set your public IP
+nano /etc/bgpx/node.toml
 
-## For LAN Devices — No Configuration Needed
+# Start
+sudo systemctl enable --now bgpx-node
 
-If your router runs BGP-X, every device on your network is protected without any changes:
-
-- Connect to the router's WiFi or Ethernet normally
-- Your traffic is automatically routed through BGP-X (for traffic matching the routing policy)
-- No app changes, no VPN client, no browser extensions
-
----
-
-## For Developers — SDK Connection Model
-
-The BGP-X SDK does NOT implement its own routing. It connects to the daemon:
-
-```
-Your App → SDK → Unix Socket → BGP-X Router Daemon → Overlay Network
-```
-
-The daemon handles all path construction, encryption, and DHT. Your app just calls `connect_stream()` and gets back a socket.
-
-If the daemon is on a router and your app is on a LAN device:
-- SSH socket forwarding: `ssh -L /tmp/bgpx.sock:/var/run/bgpx/sdk.sock user@router`
-- TCP endpoint: router exposes `192.168.1.1:7475` on LAN (requires authentication)
-- Or use SDK Embedded Mode (full daemon in-process, for mobile)
-
----
-
-## DHT Pools
-
-Pools are named, signed collections of BGP-X nodes grouped by trust level. Instead of one flat pool of all relays, you can:
-
-- Use the **default pool** for general traffic
-- Use a **curated pool** (signed by a trusted curator) for higher trust
-- Use a **private pool** (your own nodes) for exit infrastructure you control
-- Chain segments from different pools for multi-tier trust paths
-
-Example: `Entry from default pool → Relay from trusted pool → Exit from my private pool`
-
-This is the **double-exit architecture** — two independent exit pools in sequence:
-
-```
-Client → [default pool entry + relay] → [private pool exit 1] → [private pool exit 2] → Destination
-Exit 1 sees: traffic going to Exit 2 (not destination)
-Exit 2 sees: traffic from Exit 1 (not client)
+# Verify
+bgpx-cli status
+bgpx-cli paths build --segments "default:3,default:1"
 ```
 
 ---
 
-## Encrypted Client Hello (ECH)
+## 4. Quick Start (OpenWrt Router)
 
-When you connect to a clearnet destination through a BGP-X exit node, the exit node must connect to the destination via TLS. Normally, TLS ClientHello includes the Server Name Indication (SNI) — the domain name in plaintext.
+```bash
+# On the router
+opkg update && opkg install bgpx-node luci-app-bgpx
 
-ECH (Encrypted Client Hello) hides the domain name from SNI when:
-- The destination publishes an ECH configuration in its DNS HTTPS record
-- The exit node is ECH-capable (`ech_capable = true` in exit policy)
-
-Result: even the exit node does not see the domain name in plaintext. The network sees only the destination IP.
-
----
-
-## Mesh Modes
-
-BGP-X supports operating without any ISP connection:
-
-**Mesh Node (Mode 4)**: runs on a router with no WAN connection. Communicates with other BGP-X nodes via WiFi 802.11s mesh or LoRa radio. Can be deployed in rural communities, for disaster recovery, or anywhere ISP access is unavailable.
-
-**Gateway Node (Mode 5)**: has both mesh radio and a WAN connection. Acts as the bridge — mesh users route clearnet traffic through the gateway. The gateway's ISP sees the traffic; individual mesh users have no direct ISP exposure.
-
-**Broadcast Amplifier (Mode 6)**: minimal hardware (no Linux required), single radio. Receives and rebroadcasts BGP-X mesh packets to extend range. No routing intelligence.
+# Configure via LuCI web interface
+# Or via CLI:
+uci set bgpx.@node[0].enabled=1
+uci set bgpx.@node[0].public_addr=$(curl -s ifconfig.me)
+uci commit bgpx
+/etc/init.d/bgpx-node restart
+```
 
 ---
 
-## Pluggable Transport
+## 5. Three Equal Entry Points
 
-Your ISP can observe that you're connecting to BGP-X entry nodes (encrypted UDP on port 7474). Pluggable transport obfuscates this traffic pattern to look like something else.
+BGP-X treats three network classes as equal first-class citizens:
 
-BGP-X's built-in PT uses obfs4-style obfuscation (random padding + stream cipher). External PT subprocess interface is also supported.
+**Clearnet (standard internet)**: you have a standard ISP connection. BGP-X daemon routes your traffic through the onion overlay. No special hardware needed.
 
-Enable with: `[pluggable_transport] enabled = true` in daemon config.
+**BGP-X overlay**: the onion-encrypted routing layer itself. Paths stay within the overlay for additional hops before exiting.
 
----
-
-## What BGP-X Does Not Do
-
-Be clear about this before deploying:
-
-- **BGP-X does not protect you if your application leaks your identity.** Logging into a service with your real username tells the service who you are.
-- **BGP-X does not encrypt content beyond the overlay.** Always use HTTPS for clearnet connections — the exit node sees destination IP and can see plaintext HTTP content.
-- **BGP-X does not protect you if your device is compromised.** Malware can observe your traffic before encryption.
-- **BGP-X does not hide that you use BGP-X from your ISP.** Your ISP sees encrypted UDP to an entry node. Pluggable transport mitigates this.
-- **BGP-X does not prevent traffic blocking.** Your ISP can block port 7474. Pluggable transport mitigates this.
-- **BGP-X does not make illegal activities legal.** Using BGP-X does not grant legal protection for any conduct.
+**Mesh islands**: community radio networks (WiFi, LoRa, Bluetooth). No ISP required within the island. Cross-domain access to/from clearnet via bridge nodes.
 
 ---
 
-## Security Recommendations
+## 6. N-Hop Unlimited
 
-1. Always use HTTPS for clearnet connections
-2. Enable ECH-requiring exit constraints for sensitive destinations
-3. Use private pool for exit if you control server infrastructure
-4. Use pluggable transport if you're in an environment that blocks or monitors VPN/proxy traffic
-5. Use BGP-X-only firmware for maximum enforcement
-6. Verify node signatures — never disable signature verification
-7. If operating an exit gateway: publish no-log policy, use DoH with DNSSEC and ECS stripping, enable ECH
+BGP-X imposes no protocol maximum on path length. Default is 4 hops for single-domain clearnet. You can specify paths with any number of hops across any combination of routing domains.
+
+```toml
+# High-security path: 15 hops across 3 domains
+domain_segments = [
+    { type = "segment", domain = "clearnet", hops = 5 },
+    { type = "bridge", from_domain = "clearnet", to_domain = "mesh:trusted-island" },
+    { type = "segment", domain = "mesh:trusted-island", hops = 4 },
+    { type = "bridge", from_domain = "mesh:trusted-island", to_domain = "clearnet" },
+    { type = "segment", domain = "clearnet", pool = "private-exits", hops = 4, exit = true }
+]
+```
 
 ---
 
-## Next Steps
+## 7. Cross-Domain Routing
 
-- **Understand the architecture**: `ARCHITECTURE.md` and `docs/deployment_architecture.md`
-- **Understand BGP/BGP-X coexistence**: `docs/bgp_bgpx_coexistence.md`
-- **Deploy on a router**: `/deployment/node_setup.md`
-- **Deploy a mesh network**: `/deployment/mesh_deployment.md`
-- **Build an application**: `/docs/application_guide.md` and `/sdk/sdk_spec.md`
-- **Run a relay or exit node**: `/node/node.md`
-- **Understand the threat model**: `/security/threat_model.md`
-- **Understand pools**: `/protocol/pool_spec.md`
+BGP-X enables routing between clearnet, overlay, and mesh islands in any combination.
+
+**Clearnet user reaching mesh island service**:
+- No mesh hardware needed
+- BGP-X daemon discovers bridge nodes automatically
+- Bridge node handles radio transmission on your behalf
+
+**Mesh island reaching clearnet**:
+- Route via gateway node (domain bridge with internet connection)
+- No direct ISP exposure for island members
+
+**See `/docs/cross_domain_routing.md` for detailed examples.**
+
+---
+
+## 8. Basic Routing Policy
+
+```toml
+# /etc/bgpx/routing_policy.toml
+
+[[rules]]
+id = "default"
+match = { destination_domain = ["*"] }
+action = "bgpx"
+path_constraints = {
+    exit_logging_policy = "none",
+    exit_jurisdiction_blacklist = ["US"]
+}
+default = true
+
+[[rules]]
+id = "direct-local"
+match = { destination_cidr = ["192.168.0.0/16", "10.0.0.0/8"] }
+action = "standard"
+priority = 0
+```
+
+---
+
+## 9. First Verification
+
+```bash
+# Check node is active and DHT-connected
+bgpx-cli status
+
+# Check you have nodes in database
+bgpx-cli nodes list --limit 5
+
+# Build a test path and verify it works
+bgpx-cli paths build --segments "default:3,default:1"
+bgpx-cli paths list
+
+# Test a connection
+curl --proxy socks5h://127.0.0.1:1080 https://check.bgpx.network/
+
+# If domain bridge configured:
+bgpx-cli domains list
+bgpx-cli domains test --from clearnet --to "mesh:your-island-name"
+```
+
+---
+
+## 10. Next Steps
+
+- **Exit node**: see `/deployment/node_setup.md` Section 6
+- **Domain bridge**: see `/deployment/node_setup.md` Section 7
+- **Mesh island**: see `/deployment/mesh_deployment.md`
+- **SDK integration**: see `/sdk/sdk_spec.md`
+- **Routing policy**: see `/docs/routing_policy.md`
+- **Security**: see `/security/threat_model.md`
