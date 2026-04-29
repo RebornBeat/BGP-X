@@ -2,68 +2,73 @@
 
 **Version**: 0.1.0-draft
 
-This document specifies the internal API contracts between the major subsystems of the BGP-X node daemon. It is intended for implementors of the reference implementation and contributors building alternative implementations.
-
 ---
 
 ## 1. Overview
 
-The BGP-X node daemon is composed of loosely coupled subsystems that communicate through well-defined internal interfaces. This document specifies those interfaces — the function signatures, data types, error conditions, and behavioral contracts for each subsystem boundary.
+The BGP-X node daemon is composed of loosely coupled subsystems communicating through well-defined internal interfaces. This document specifies those interfaces for implementors building the reference implementation or alternative implementations.
 
-All interfaces described here are internal. They are not exposed over the network or to external processes. The external-facing interface is the Control API (see `/control-plane/control_api.md`).
+All interfaces are internal — not exposed over the network or to external processes. The Control API (`/control-plane/control_api.md`) and SDK API (`/sdk/sdk_spec.md`) are the external-facing interfaces.
 
 ---
 
 ## 2. Core Data Types
 
-### 2.1 NodeId
-
 ```rust
-/// A 32-byte BLAKE3 hash of an Ed25519 public key.
-/// Used as the primary identifier for nodes in the DHT and routing.
+/// 32-byte BLAKE3 hash of Ed25519 public key
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId([u8; 32]);
-
 impl NodeId {
     pub fn from_public_key(key: &Ed25519PublicKey) -> Self;
     pub fn to_hex(&self) -> String;
     pub fn from_hex(s: &str) -> Result<Self, ParseError>;
     pub fn xor_distance(&self, other: &NodeId) -> NodeId;
 }
-```
 
-### 2.2 SessionId
-
-```rust
-/// A 16-byte random session identifier.
+/// 16-byte random session identifier
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId([u8; 16]);
-
 impl SessionId {
-    pub fn generate() -> Self;  // Uses CSPRNG
-    pub fn as_bytes(&self) -> &[u8; 16];
+    pub fn generate() -> Self;  // CSPRNG
 }
-```
 
-### 2.3 StreamId
+/// 8-byte random path identifier — return traffic routing, never all-zeros
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PathId([u8; 8]);
+impl PathId {
+    pub fn generate() -> Self;  // CSPRNG, retries until not all-zeros
+    pub fn is_valid(&self) -> bool { self.0 != [0u8; 8] }
+}
 
-```rust
-/// A 32-bit stream identifier within a session.
+/// 32-bit stream identifier with parity enforcement
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StreamId(u32);
-
 impl StreamId {
-    pub fn is_client_initiated(&self) -> bool;   // odd IDs
-    pub fn is_service_initiated(&self) -> bool;  // even IDs
-    pub fn next_client_id(current: StreamId) -> StreamId;
-    pub fn next_service_id(current: StreamId) -> StreamId;
+    pub fn is_client_initiated(&self) -> bool { self.0 % 2 == 1 }
+    pub fn is_service_initiated(&self) -> bool { self.0 % 2 == 0 }
+    pub fn next_client_id(current: StreamId) -> StreamId { StreamId(current.0 + 2) }
 }
-```
 
-### 2.4 SessionKey
+/// 8-byte routing domain identifier: type (4B BE) + instance hash (4B BE)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DomainId([u8; 8]);
+impl DomainId {
+    pub fn clearnet() -> Self { DomainId([0,0,0,1, 0,0,0,0]) }
+    pub fn mesh(island_id: &str) -> Self {
+        let hash = blake3::hash(island_id.as_bytes());
+        let mut id = [0u8; 8];
+        id[0..4].copy_from_slice(&[0,0,0,3]);
+        id[4..8].copy_from_slice(&hash.as_bytes()[0..4]);
+        DomainId(id)
+    }
+    pub fn domain_type(&self) -> u32 { u32::from_be_bytes(self.0[0..4].try_into().unwrap()) }
+    pub fn is_clearnet(&self) -> bool { self.domain_type() == 1 }
+    pub fn is_mesh(&self) -> bool { self.domain_type() == 3 }
+    pub fn is_satellite(&self) -> bool { self.domain_type() == 5 }
+}
 
-```rust
-/// A 32-byte ChaCha20-Poly1305 session key.
-/// Stored in locked, zeroizable memory.
+/// Session key (zeroizable) — domain-agnostic, same derivation in all domains
 pub struct SessionKey(Zeroizing<[u8; 32]>);
-
 impl SessionKey {
     pub fn from_handshake_material(
         dh1: &[u8; 32],
@@ -71,60 +76,21 @@ impl SessionKey {
         session_id: &SessionId,
         node_id: &NodeId,
     ) -> Self;
-
-    pub fn encrypt(
-        &self,
-        sequence: u64,
-        aad: &[u8],
-        plaintext: &[u8],
-    ) -> Vec<u8>;
-
-    pub fn decrypt(
-        &self,
-        sequence: u64,
-        aad: &[u8],
-        ciphertext: &[u8],
-    ) -> Result<Vec<u8>, DecryptionError>;
+    pub fn encrypt(&self, sequence: u64, aad: &[u8], plaintext: &[u8]) -> Vec<u8>;
+    pub fn decrypt(&self, sequence: u64, aad: &[u8], ciphertext: &[u8])
+        -> Result<Vec<u8>, DecryptionError>;
 }
-
 impl Drop for SessionKey {
-    fn drop(&mut self) {
-        // Zeroize key material on drop
-    }
-}
-```
-
-### 2.5 NodeAdvertisement
-
-```rust
-pub struct NodeAdvertisement {
-    pub version: u8,
-    pub node_id: NodeId,
-    pub public_key: Ed25519PublicKey,
-    pub roles: Vec<NodeRole>,
-    pub endpoints: Vec<Endpoint>,
-    pub exit_policy: Option<ExitPolicy>,
-    pub bandwidth_mbps: f32,
-    pub latency_ms: f32,
-    pub uptime_pct: f32,
-    pub region: Region,
-    pub country: CountryCode,
-    pub asn: u32,
-    pub operator_id: Option<Ed25519PublicKey>,
-    pub protocol_versions_min: u16,
-    pub protocol_versions_max: u16,
-    pub extensions: ExtensionFlags,
-    pub signed_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub signature: Ed25519Signature,
+    fn drop(&mut self) { /* explicit zeroize using zeroize crate */ }
 }
 
-impl NodeAdvertisement {
-    pub fn verify(&self) -> Result<(), AdvertisementError>;
-    pub fn is_expired(&self) -> bool;
-    pub fn canonical_json(&self) -> String;
-    pub fn to_wire(&self) -> Vec<u8>;
-    pub fn from_wire(bytes: &[u8]) -> Result<Self, ParseError>;
+/// Cross-domain path table entry for bridge nodes
+pub struct CrossDomainPathEntry {
+    pub source_domain: DomainId,
+    pub source_addr:   SocketAddr,
+    pub target_domain: DomainId,
+    pub created:       Instant,
+    pub ttl:           Duration,
 }
 ```
 
@@ -134,54 +100,63 @@ impl NodeAdvertisement {
 
 ### 3.1 ForwardingPipeline
 
-The forwarding pipeline is the hot path. Its interface is minimal to avoid overhead.
-
 ```rust
 pub trait ForwardingPipeline: Send + Sync {
-
-    /// Process a received UDP datagram.
-    /// Called by receiver threads for every incoming packet.
-    /// Must be non-blocking and complete in < 1ms (p99).
-    fn process_packet(
-        &self,
-        source_addr: SocketAddr,
-        data: &[u8],
-    ) -> ProcessResult;
-
-    /// Enqueue a packet for transmission.
-    /// Called by dispatch handlers after processing.
-    fn enqueue_packet(
-        &self,
-        dest_addr: SocketAddr,
-        data: Bytes,
-    ) -> Result<(), QueueFullError>;
-
-    /// Register a new session.
-    /// Called by the handshake handler after successful completion.
-    fn register_session(
-        &self,
-        session_id: SessionId,
-        session_key: SessionKey,
-        remote_addr: SocketAddr,
-    ) -> Result<(), SessionError>;
-
-    /// Remove a session.
+    fn process_packet(&self, source_addr: SocketAddr, domain: DomainId, data: &[u8]) -> ProcessResult;
+    fn enqueue_packet(&self, dest_addr: SocketAddr, domain: DomainId, data: Bytes) -> Result<(), QueueFullError>;
+    fn register_session(&self, session_id: SessionId, session_key: SessionKey, remote_addr: SocketAddr) -> Result<(), SessionError>;
     fn remove_session(&self, session_id: &SessionId);
 
-    /// Get current forwarding statistics.
+    // Single-domain path table
+    fn record_path_id(&self, path_id: PathId, source_addr: SocketAddr, session_id: &SessionId);
+    fn lookup_path_predecessor(&self, path_id: &PathId) -> Option<SocketAddr>;
+
+    // Cross-domain path table (for bridge nodes)
+    fn record_cross_domain_path_id(
+        &self,
+        path_id: PathId,
+        source_domain: DomainId,
+        source_addr: SocketAddr,
+        target_domain: DomainId,
+    );
+    fn resolve_cross_domain_return(
+        &self,
+        path_id: &PathId,
+        from_domain: &DomainId,
+    ) -> Option<(DomainId, SocketAddr)>;
+
+    fn forward_return_traffic(&self, path_id: &PathId, packet: Bytes) -> Result<(), ForwardError>;
+    fn forward_cross_domain_return(
+        &self,
+        path_id: &PathId,
+        from_domain: &DomainId,
+        packet: Bytes,
+    ) -> Result<(), ForwardError>;
+
     fn stats(&self) -> ForwardingStats;
 }
 
 pub enum ProcessResult {
     Forwarded,
-    Delivered,         // For local BGP-X native service delivery
-    DroppedDecrypt,    // Decryption failure
-    DroppedReplay,     // Replay detection
-    DroppedUnknown,    // Unknown session
-    DroppedInvalid,    // Malformed packet
-    HandshakeMessage,  // Route to handshake handler
-    DhtMessage,        // Route to DHT handler
-    KeepaliveMessage,  // Route to keepalive handler
+    CrossDomainForwarded,   // DOMAIN_BRIDGE hop dispatched to target transport
+    ReturnForwarded,        // Return traffic forwarded via path_id
+    CrossDomainReturnForwarded,  // Return traffic forwarded across domain boundary
+    Delivered,              // BGP-X native service delivery
+    DroppedDecrypt,
+    DroppedReplay,
+    DroppedUnknown,
+    DroppedInvalid,
+    HandshakeMessage,
+    DhtMessage,
+    KeepaliveMessage,
+    MeshBeacon,
+    MeshFragment,
+    NodeWithdrawal,
+    PathQualityReport,
+    PoolKeyRotation,
+    DomainAdvertise,
+    MeshIslandAdvertise,
+    CoverTraffic,           // COVER processed identically to RELAY (silent drop after failed parse)
 }
 ```
 
@@ -189,45 +164,37 @@ pub enum ProcessResult {
 
 ```rust
 pub trait SessionManager: Send + Sync {
-
-    /// Look up a session by ID.
-    /// Must be constant-time whether session exists or not.
     fn get_session(&self, id: &SessionId) -> Option<Arc<Session>>;
-
-    /// Create a new session (called after handshake completes).
     fn create_session(
         &self,
         id: SessionId,
         key: SessionKey,
+        keepalive_key: SessionKey,
         remote_node_id: Option<NodeId>,
         remote_addr: SocketAddr,
+        domain: DomainId,    // Which routing domain this session is in
     ) -> Result<Arc<Session>, SessionError>;
-
-    /// Close a session and clean up all associated streams.
-    fn close_session(
-        &self,
-        id: &SessionId,
-        reason: CloseReason,
-    );
-
-    /// List all active sessions (for monitoring; no identifying details).
+    fn close_session(&self, id: &SessionId, reason: CloseReason);
+    fn schedule_rehandshake(&self, id: &SessionId, at: Duration);
     fn list_sessions(&self) -> Vec<SessionSummary>;
-
-    /// Current session count.
     fn session_count(&self) -> usize;
 }
 
 pub struct Session {
-    pub id: SessionId,
-    pub key: SessionKey,
-    pub state: AtomicSessionState,
-    pub sequence_window: Mutex<SequenceWindow>,
-    pub outbound_sequence: AtomicU64,
-    pub last_seen: AtomicU64,   // Unix timestamp
-    pub bytes_relayed: AtomicU64,
-    pub packets_relayed: AtomicU64,
-    pub decryption_failures: AtomicU32,
-    pub streams: DashMap<StreamId, Arc<Stream>>,
+    pub id:                    SessionId,
+    pub key:                   SessionKey,
+    pub keepalive_key:         SessionKey,
+    pub domain:                DomainId,         // Routing domain for this session
+    pub state:                 AtomicSessionState,
+    pub inbound_sequence_window: Mutex<SequenceWindow>,
+    pub outbound_sequence:     AtomicU64,
+    pub last_seen:             AtomicU64,
+    pub bytes_relayed:         AtomicU64,
+    pub packets_relayed:       AtomicU64,
+    pub decryption_failures:   AtomicU32,
+    pub created_at:            Instant,
+    pub streams:               DashMap<StreamId, Arc<Stream>>,
+    pub path_ids:              DashSet<PathId>,   // path_ids associated with this session
 }
 ```
 
@@ -235,159 +202,317 @@ pub struct Session {
 
 ```rust
 pub trait HandshakeHandler: Send + Sync {
-
-    /// Process a HANDSHAKE_INIT message.
+    /// Handle HANDSHAKE_INIT (0x02)
+    /// cleartext_ephemeral_pub is the 32-byte client ephemeral pubkey from bytes 32-63
     fn handle_init(
         &self,
         source_addr: SocketAddr,
-        payload: &[u8],
+        source_domain: DomainId,
+        cleartext_ephemeral_pub: &[u8; 32],
+        encrypted_payload: &[u8],
     ) -> HandshakeResult;
 
-    /// Process a HANDSHAKE_DONE message.
+    /// Handle HANDSHAKE_DONE (0x04)
     fn handle_done(
         &self,
         session_id: &SessionId,
         payload: &[u8],
     ) -> HandshakeResult;
+
+    /// Handle re-handshake on existing session (24hr key rotation)
+    fn handle_rehandshake(
+        &self,
+        session_id: &SessionId,
+        cleartext_ephemeral_pub: &[u8; 32],
+        encrypted_payload: &[u8],
+    ) -> HandshakeResult;
 }
 
 pub enum HandshakeResult {
-    /// Handshake in progress; response has been sent.
     InProgress,
-    /// Handshake complete; session is now established.
     Complete(SessionId),
-    /// Handshake failed; reason is logged internally.
+    RehandshakeComplete(SessionId),
     Failed,
 }
 ```
 
-### 3.4 DhtSubsystem
+### 3.4 PathTable
 
 ```rust
-pub trait DhtSubsystem: Send + Sync {
-
-    /// Find the k nodes closest to a target ID.
-    async fn find_nodes(
-        &self,
-        target: &NodeId,
-        max_results: usize,
-    ) -> Vec<NodeContact>;
-
-    /// Store a record in the DHT.
-    async fn put(
-        &self,
-        key: &[u8; 32],
-        value: Vec<u8>,
-    ) -> Result<usize, DhtError>;  // Returns number of storage nodes reached
-
-    /// Retrieve a record from the DHT.
-    async fn get(
-        &self,
-        key: &[u8; 32],
-    ) -> Result<Option<Vec<u8>>, DhtError>;
-
-    /// Publish this node's own advertisement.
-    async fn publish_advertisement(
-        &self,
-        advertisement: &NodeAdvertisement,
-    ) -> Result<usize, DhtError>;
-
-    /// Get current DHT statistics.
-    fn stats(&self) -> DhtStats;
-
-    /// Get the current estimated network size.
-    fn estimated_network_size(&self) -> u64;
+/// Single-domain path table
+pub trait PathTable: Send + Sync {
+    fn insert(&self, path_id: PathId, source_addr: SocketAddr, session_id: SessionId);
+    fn lookup(&self, path_id: &PathId) -> Option<PathTableEntry>;
+    fn remove(&self, path_id: &PathId);
+    fn cleanup_expired(&self);
+    fn size(&self) -> usize;
 }
 
-pub struct NodeContact {
-    pub node_id: NodeId,
-    pub addr: SocketAddr,
+pub struct PathTableEntry {
+    pub source_addr: SocketAddr,
+    pub session_id:  SessionId,
+    pub created:     Instant,
+    pub ttl:         Duration,
 }
 ```
 
-### 3.5 ReputationSystem
+### 3.5 CrossDomainPathTable
+
+```rust
+/// Cross-domain path table for bridge nodes
+pub trait CrossDomainPathTable: Send + Sync {
+    fn insert(
+        &self,
+        path_id: PathId,
+        source_domain: DomainId,
+        source_addr: SocketAddr,
+        target_domain: DomainId,
+    );
+    fn lookup(&self, path_id: &PathId) -> Option<CrossDomainPathEntry>;
+    fn lookup_return(
+        &self,
+        path_id: &PathId,
+        arriving_from_domain: &DomainId,
+    ) -> Option<(DomainId, SocketAddr)>;  // Returns (forward_to_domain, forward_to_addr)
+    fn remove(&self, path_id: &PathId);
+    fn cleanup_expired(&self);
+    fn size(&self) -> usize;
+}
+```
+
+### 3.6 DhtSubsystem
+
+```rust
+pub trait DhtSubsystem: Send + Sync {
+    // Standard DHT operations
+    async fn find_nodes(&self, target: &NodeId, max_results: usize) -> Vec<NodeContact>;
+    async fn find_nodes_in_domain(
+        &self,
+        target: &NodeId,
+        domain: &DomainId,
+        max_results: usize,
+    ) -> Vec<NodeContact>;
+
+    async fn put(&self, key: &[u8; 32], value: Vec<u8>) -> Result<usize, DhtError>;
+    async fn get(&self, key: &[u8; 32]) -> Result<Option<Vec<u8>>, DhtError>;
+
+    // Advertisement publication
+    async fn publish_advertisement(&self, advertisement: &NodeAdvertisement) -> Result<usize, DhtError>;
+    async fn publish_withdrawal(&self, node_id: &NodeId, private_key: &Ed25519PrivateKey) -> Result<(), DhtError>;
+
+    // Domain bridge records
+    async fn publish_domain_bridge(&self, record: &DomainBridgeRecord) -> Result<usize, DhtError>;
+    async fn get_domain_bridge(
+        &self,
+        from_domain: &DomainId,
+        to_domain: &DomainId,
+    ) -> Result<Option<DomainBridgeRecord>, DhtError>;
+
+    // Mesh island records
+    async fn publish_mesh_island(&self, record: &MeshIslandRecord) -> Result<usize, DhtError>;
+    async fn get_mesh_island(&self, island_id: &str) -> Result<Option<MeshIslandRecord>, DhtError>;
+
+    // Mesh transport
+    async fn broadcast_beacon(&self, beacon: &MeshBeacon) -> Result<usize, DhtError>;
+
+    fn stats(&self) -> DhtStats;
+    fn estimated_network_size(&self) -> u64;
+}
+```
+
+### 3.7 PoolManager
+
+```rust
+pub trait PoolManager: Send + Sync {
+    async fn get_pool(&self, pool_id: &str) -> Option<Arc<Pool>>;
+    async fn add_pool(&self, pool: Pool) -> Result<(), PoolError>;
+    async fn remove_pool(&self, pool_id: &str) -> Result<(), PoolError>;
+    async fn refresh_pool(&self, pool_id: &str) -> Result<usize, PoolError>;
+    async fn verify_pool_membership(&self, pool: &Pool, node: &NodeAdvertisement) -> bool;
+    async fn apply_key_rotation(&self, rotation: &KeyRotationRecord) -> Result<(), PoolError>;
+    // Domain-aware pool operations
+    async fn get_pools_for_domain(&self, domain: &DomainId) -> Vec<Arc<Pool>>;
+    async fn get_bridge_pools(
+        &self,
+        from_domain: &DomainId,
+        to_domain: &DomainId,
+    ) -> Vec<Arc<Pool>>;
+    fn list_pools(&self) -> Vec<PoolSummary>;
+}
+```
+
+### 3.8 DomainBridgeManager
+
+```rust
+/// Manages cross-domain routing for nodes that serve multiple routing domains
+pub trait DomainBridgeManager: Send + Sync {
+    /// Returns all routing domains this node has active endpoints in
+    fn get_served_domains(&self) -> Vec<DomainId>;
+
+    /// Returns all active domain bridge pairs this node supports
+    fn get_active_bridges(&self) -> Vec<(DomainId, DomainId)>;
+
+    /// Returns true if this node can bridge the given domain pair
+    fn can_bridge(&self, from_domain: &DomainId, to_domain: &DomainId) -> bool;
+
+    /// Execute a domain bridge transition (forward packet to target domain)
+    async fn transition(
+        &self,
+        packet: Bytes,
+        from_domain: DomainId,
+        to_domain: DomainId,
+        path_id: PathId,
+        source_addr: SocketAddr,
+    ) -> Result<(), BridgeError>;
+
+    /// Record a cross-domain path_id mapping (called from forwarding pipeline)
+    fn record_cross_domain_path_id(
+        &self,
+        path_id: PathId,
+        source_domain: DomainId,
+        source_addr: SocketAddr,
+        target_domain: DomainId,
+    );
+
+    /// Resolve return routing for a given path_id arriving from a specific domain
+    fn resolve_cross_domain_return(
+        &self,
+        path_id: &PathId,
+        arriving_from_domain: &DomainId,
+    ) -> Option<(DomainId, SocketAddr)>;
+
+    /// Mark a bridge pair as temporarily unavailable (e.g., mesh radio offline)
+    async fn set_bridge_availability(
+        &self,
+        from_domain: &DomainId,
+        to_domain: &DomainId,
+        available: bool,
+    ) -> Result<(), BridgeError>;
+
+    /// Statistics for this bridge node
+    fn bridge_stats(&self) -> BridgeStats;
+}
+
+pub struct BridgeStats {
+    pub transitions_total:         u64,
+    pub transitions_by_pair:       HashMap<(DomainId, DomainId), u64>,
+    pub cross_domain_path_entries: usize,
+    pub bridge_latency_ms:         HashMap<(DomainId, DomainId), f64>,
+}
+
+pub enum BridgeError {
+    DomainNotServed(DomainId),
+    NoBridgeForPair(DomainId, DomainId),
+    BridgeUnavailable,
+    TransportError(TransportError),
+    NodeNotResolvable,
+}
+```
+
+### 3.9 MeshIslandManager
+
+```rust
+/// Manages mesh island registration and DHT publishing
+pub trait MeshIslandManager: Send + Sync {
+    /// Register this node as participating in a mesh island
+    async fn register_island(&self, island: MeshIslandConfig) -> Result<(), IslandError>;
+
+    /// Get the current status of a known mesh island
+    async fn get_island_status(&self, island_id: &str) -> Option<MeshIslandStatus>;
+
+    /// List all known mesh islands (local cache)
+    fn list_known_islands(&self) -> Vec<IslandSummary>;
+
+    /// Force publish mesh island advertisement to unified DHT
+    /// (called by bridge node when internet connectivity is available)
+    async fn publish_island_advertisement(&self, island_id: &str) -> Result<usize, IslandError>;
+
+    /// Fetch and cache mesh island advertisement from unified DHT
+    async fn fetch_island_advertisement(&self, island_id: &str) -> Result<MeshIslandRecord, IslandError>;
+
+    /// Record that a bridge node for an island has come online or gone offline
+    fn record_bridge_availability(
+        &self,
+        island_id: &str,
+        bridge_node_id: &NodeId,
+        available: bool,
+    );
+}
+
+pub struct MeshIslandConfig {
+    pub island_id:             String,
+    pub domain_id:             DomainId,
+    pub transports:            Vec<TransportType>,
+    pub auto_publish:          bool,
+    pub advertisement_interval: Duration,
+}
+
+pub struct MeshIslandStatus {
+    pub island_id:          String,
+    pub domain_id:          DomainId,
+    pub online:             bool,
+    pub active_relay_count: u32,
+    pub bridge_node_count:  u32,
+    pub last_advertisement: Option<Instant>,
+    pub dht_coverage:       DhtCoverage,
+}
+```
+
+### 3.10 ReputationSystem
 
 ```rust
 pub trait ReputationSystem: Send + Sync {
-
-    /// Record a reputation event for a node.
-    fn record_event(
-        &self,
-        node_id: &NodeId,
-        event: ReputationEvent,
-    );
-
-    /// Get the reputation score for a node.
+    fn record_event(&self, node_id: &NodeId, event: ReputationEvent);
+    fn record_domain_event(&self, node_id: &NodeId, domain: &DomainId, event: ReputationEvent);
     fn get_score(&self, node_id: &NodeId) -> f32;
-
-    /// Check if a node is blacklisted.
+    fn get_domain_score(&self, node_id: &NodeId, domain: &DomainId) -> f32;
     fn is_blacklisted(&self, node_id: &NodeId) -> bool;
-
-    /// Manually blacklist a node.
-    fn blacklist(
-        &self,
-        node_id: &NodeId,
-        reason: BlacklistReason,
-        duration: Option<Duration>,
-    );
-
-    /// Remove a manual blacklist entry (cannot remove permanent entries).
-    fn unblacklist(
-        &self,
-        node_id: &NodeId,
-    ) -> Result<(), ReputationError>;
-
-    /// Flush the reputation database to disk.
+    fn blacklist(&self, node_id: &NodeId, reason: BlacklistReason, duration: Option<Duration>);
+    fn unblacklist(&self, node_id: &NodeId) -> Result<(), ReputationError>;
+    fn record_rtt(&self, node_id: &NodeId, rtt_ms: f64, domain: &DomainId);
+    fn get_geo_plausibility_score(&self, node_id: &NodeId, domain: &DomainId) -> f32;
     async fn flush(&self) -> Result<(), IoError>;
 }
 
 pub enum ReputationEvent {
-    RelaySuccess,
-    RelayFailure,
-    KeepaliveSuccess,
-    KeepaliveTimeout,
-    HandshakeSuccess,
-    HandshakeFailure,
-    LatencyWithinAdvertised,
-    LatencyExceeded,
+    // Unchanged events
+    RelaySuccess, RelayFailure,
+    KeepaliveSuccess, KeepaliveTimeout,
+    HandshakeSuccess, HandshakeFailure,
+    LatencyWithinAdvertised, LatencyExceeded,
     AdvertisementInconsistency,
     ProtocolViolation,
     SuspiciousBehavior,
-    BandwidthWithinAdvertised,
-    UptimeConsistent,
+    GeoPlausible, GeoSuspicious, GeoImplausible, ProtocolViolationGeo,
+    EchCapableButFailing,
+    CleanWithdrawal, WithdrawalWithoutNotice,
+
+    // New cross-domain events
+    DomainBridgeSuccess,           // +0.5: successfully bridged traffic between domains
+    DomainBridgeFailure,           // -3.0: domain bridge failed (timeout/no connectivity)
+    MeshIslandStable,              // +0.3: mesh island consistently reachable via this bridge
+    MeshIslandUnreachable,         // -2.0: mesh island became unreachable via this bridge
+    BridgeLatencyWithinAdvertised, // +0.3: bridge transition latency within advertised range
+    BridgeLatencyExceeded,         // -1.0: bridge transition latency > 200% of advertised
+    BridgeClaimedAvailableOffline, // -4.0: advertised bridge as available but couldn't deliver
+    FakeDomainAdvertisement,       // -15.0: claimed domain endpoint it cannot reach
 }
 ```
 
-### 3.6 ExitPolicyEngine (Exit Nodes Only)
+### 3.11 ExitPolicyEngine
 
 ```rust
 pub trait ExitPolicyEngine: Send + Sync {
-
-    /// Check whether a destination is permitted by the exit policy.
-    fn allows(
-        &self,
-        protocol: Protocol,
-        destination: &Destination,
-        port: u16,
-    ) -> PolicyDecision;
-
-    /// Establish an outbound connection to a clearnet destination.
+    fn allows(&self, protocol: Protocol, destination: &Destination, port: u16) -> PolicyDecision;
     async fn connect(
         &self,
         destination: &Destination,
         port: u16,
         protocol: Protocol,
     ) -> Result<OutboundConnection, ExitError>;
-
-    /// Get the signed exit policy (for inclusion in advertisement).
+    async fn resolve_ech_config(&self, domain: &str) -> Option<EchConfig>;
     fn signed_policy(&self) -> &SignedExitPolicy;
-}
-
-pub enum PolicyDecision {
-    Allow,
-    DenyProtocol,
-    DenyPort,
-    DenyDestination,
+    fn current_policy_version(&self) -> u16;
 }
 
 pub enum ExitError {
@@ -396,53 +521,107 @@ pub enum ExitError {
     DnsResolutionFailed,
     Timeout,
     MaxConnectionsReached,
+    EchRequiredNotAvailable,
+    EchNegotiationFailed,
+    PrivateIPDenied,
 }
 ```
 
-### 3.7 MetricsCollector
+### 3.12 PluggableTransport
 
 ```rust
-pub trait MetricsCollector: Send + Sync {
-
-    fn increment(&self, counter: Counter);
-    fn gauge(&self, gauge: Gauge, value: f64);
-    fn histogram(&self, histogram: Histogram, value: f64);
-
-    /// Export all metrics in Prometheus text format.
-    fn export_prometheus(&self) -> String;
-
-    /// Get a snapshot of all metrics as a structured value.
-    fn snapshot(&self) -> MetricsSnapshot;
+pub trait PluggableTransport: Send + Sync {
+    async fn start(&self) -> Result<(), PtError>;
+    async fn stop(&self) -> Result<(), PtError>;
+    fn obfuscate(&self, packet: Bytes) -> Bytes;
+    fn deobfuscate(&self, packet: Bytes) -> Result<Bytes, PtError>;
+    fn is_running(&self) -> bool;
+    fn overhead_estimate(&self) -> PtOverhead;
 }
 
-pub enum Counter {
-    PacketsRelayed,
-    BytesRelayed,
-    SessionsOpened,
-    SessionsClosed,
-    HandshakesSucceeded,
-    HandshakesFailed,
-    KeepaliveTimeouts,
-    DecryptionFailures,
-    ReplayAttempts,
-    ExitPolicyDenials,
-    DhtQueriesSent,
-    DhtQueriesReceived,
+pub struct PtOverhead {
+    pub cpu_percent_extra:       f32,
+    pub bandwidth_percent_extra: f32,
+    pub latency_ms_extra:        f32,
+}
+```
+
+### 3.13 GeoPlausibilityScorer
+
+```rust
+pub trait GeoPlausibilityScorer: Send + Sync {
+    fn record_rtt(&self, node_id: &NodeId, rtt_ms: f64, domain: &DomainId);
+    fn get_score(&self, node_id: &NodeId, domain: &DomainId) -> f32;
+    fn check_plausibility(
+        &self,
+        node_id: &NodeId,
+        claimed_region: &Region,
+        domain: &DomainId,
+    ) -> PlausibilityResult;
+    fn is_satellite_exempt(&self, node: &NodeDatabaseEntry) -> bool;
+    fn is_lora_mesh_node(&self, node: &NodeDatabaseEntry, domain: &DomainId) -> bool;
 }
 
-pub enum Gauge {
-    ActiveSessions,
-    ActiveStreams,
-    DhtRoutingTableSize,
-    BlacklistedNodes,
-    OutputQueueDepth,
+pub struct PlausibilityResult {
+    pub score:             f32,    // 0.0-1.0
+    pub ratio:             f64,    // measured_rtt / expected_max_rtt
+    pub measurement_count: u32,
+    pub recommendation:    PlausibilityRecommendation,
+    pub domain:            DomainId,
+}
+```
+
+### 3.14 RoutingPolicyEngine
+
+```rust
+pub trait RoutingPolicyEngine: Send + Sync {
+    fn evaluate_packet(&self, packet: &IncomingPacket) -> RoutingDecision;
+    fn add_rule(&self, rule: RoutingRule, position: usize) -> Result<RuleId, PolicyError>;
+    fn remove_rule(&self, rule_id: &RuleId) -> Result<(), PolicyError>;
+    fn reorder_rule(&self, rule_id: &RuleId, new_position: usize) -> Result<(), PolicyError>;
+    fn reload(&self) -> Result<(), PolicyError>;
+    fn test_destination(
+        &self,
+        destination: &str,
+        device_ip: IpAddr,
+    ) -> TestResult;
+    fn stats(&self) -> PolicyStats;
 }
 
-pub enum Histogram {
-    PacketProcessingLatencyUs,
-    HandshakeLatencyMs,
-    PathConstructionLatencyMs,
-    RttMs,
+pub enum RoutingDecision {
+    RouteBgpx {
+        path_constraints: Option<PathConstraints>,
+        domain_segments: Option<Vec<DomainSegmentConfig>>,  // None = single-domain default
+    },
+    RouteStandard,
+    Block,
+}
+```
+
+### 3.15 MeshTransportManager
+
+```rust
+pub trait MeshTransportManager: Send + Sync {
+    async fn add_transport(
+        &self,
+        domain: DomainId,
+        transport: Box<dyn MeshTransport>,
+    ) -> Result<(), TransportError>;
+    async fn remove_transport(
+        &self,
+        domain: &DomainId,
+        transport_type: TransportType,
+    ) -> Result<(), TransportError>;
+    async fn send(
+        &self,
+        peer: &NodeId,
+        domain: &DomainId,
+        data: Bytes,
+    ) -> Result<(), TransportError>;
+    async fn broadcast(&self, domain: &DomainId, data: Bytes) -> Result<usize, TransportError>;
+    fn list_peers(&self, domain: Option<&DomainId>) -> Vec<MeshPeerInfo>;
+    fn get_transport_for_domain(&self, domain: &DomainId) -> Option<Arc<dyn MeshTransport>>;
+    fn stats(&self) -> MeshStats;
 }
 ```
 
@@ -451,7 +630,6 @@ pub enum Histogram {
 ## 4. Error Types
 
 ```rust
-/// Top-level error type for the BGP-X node daemon.
 pub enum BgpxError {
     Network(NetworkError),
     Session(SessionError),
@@ -461,27 +639,12 @@ pub enum BgpxError {
     Exit(ExitError),
     Crypto(CryptoError),
     Config(ConfigError),
+    Pool(PoolError),
+    Mesh(MeshError),
+    RoutingPolicy(PolicyError),
+    Bridge(BridgeError),
+    Island(IslandError),
     Io(IoError),
-}
-
-pub enum NetworkError {
-    SocketBindFailed { addr: SocketAddr, cause: IoError },
-    SendFailed { dest: SocketAddr, cause: IoError },
-    InvalidPacket { reason: &'static str },
-}
-
-pub enum SessionError {
-    NotFound(SessionId),
-    TableFull { max: usize },
-    InvalidState { session_id: SessionId, state: SessionState },
-    KeyDerivationFailed,
-}
-
-pub enum HandshakeError {
-    InvalidInit { reason: &'static str },
-    InvalidDone { reason: &'static str },
-    Timeout(SessionId),
-    UnknownSession(SessionId),
 }
 
 pub enum CryptoError {
@@ -489,14 +652,38 @@ pub enum CryptoError {
     SignatureInvalid,
     KeyDerivationFailed,
     RngFailed,
+    NonceReuseAttempted,
+}
+
+pub enum SessionError {
+    NotFound(SessionId),
+    TableFull { max: usize },
+    InvalidState { session_id: SessionId, state: SessionState },
+    KeyDerivationFailed,
+    RehandshakeFailed,
+}
+
+pub enum BridgeError {
+    DomainNotServed(DomainId),
+    NoBridgeForPair(DomainId, DomainId),
+    BridgeUnavailable,
+    TransportError(TransportError),
+    NodeNotResolvable,
+    CrossDomainPathTableFull,
+}
+
+pub enum IslandError {
+    IslandNotFound(String),
+    DhtPublishFailed(DhtError),
+    DhtFetchFailed(DhtError),
+    InvalidIslandId(String),
+    NoBridgeNodeOnline,
 }
 ```
 
 ---
 
 ## 5. Async Task Structure
-
-The daemon runs the following long-lived async tasks within the Tokio runtime:
 
 ```rust
 #[tokio::main]
@@ -505,18 +692,73 @@ async fn main() {
     let state = Arc::new(NodeState::new(config));
 
     tokio::select! {
-        _ = run_udp_listener(state.clone())          => {},
-        _ = run_dht_maintenance(state.clone())        => {},
-        _ = run_keepalive_monitor(state.clone())      => {},
-        _ = run_advertisement_publisher(state.clone()) => {},
-        _ = run_control_api_server(state.clone())    => {},
-        _ = run_metrics_exporter(state.clone())      => {},
-        _ = signal_handler(state.clone())            => {},
+        _ = run_udp_listener(state.clone())              => {},
+        _ = run_mesh_transports(state.clone())           => {},
+        _ = run_dht_maintenance(state.clone())           => {},
+        _ = run_keepalive_monitor(state.clone())         => {},
+        _ = run_advertisement_publisher(state.clone())   => {},
+        _ = run_domain_bridge_publisher(state.clone())   => {},
+        _ = run_island_advertisement_publisher(state.clone()) => {},
+        _ = run_session_rehandshake_scheduler(state.clone()) => {},
+        _ = run_path_table_cleanup(state.clone())        => {},
+        _ = run_cross_domain_path_table_cleanup(state.clone()) => {},
+        _ = run_sdk_socket_server(state.clone())         => {},
+        _ = run_control_api_server(state.clone())        => {},
+        _ = run_metrics_exporter(state.clone())          => {},
+        _ = run_pt_subprocess(state.clone())             => {},
+        _ = signal_handler(state.clone())                => {},
     }
 }
 ```
 
-Each task communicates with others through:
-- `Arc<NodeState>` — shared immutable configuration and mutable subsystem handles
-- Tokio channels (`mpsc`, `broadcast`) — for event notification
-- `DashMap` and atomics — for high-concurrency shared state (session table, counters)
+### Background Task Intervals
+
+| Task | Interval | Description |
+|---|---|---|
+| `run_keepalive_monitor` | 10 seconds | Check session liveness; clean path tables |
+| `run_path_table_cleanup` | 30 seconds | Expire single-domain path_id entries |
+| `run_cross_domain_path_table_cleanup` | 30 seconds | Expire cross-domain path_id entries |
+| `run_advertisement_publisher` | 12 hours | Re-publish node advertisement to DHT |
+| `run_domain_bridge_publisher` | 8 hours | Re-publish DOMAIN_ADVERTISE records |
+| `run_island_advertisement_publisher` | 8 hours | Re-publish MESH_ISLAND_ADVERTISE if internet available |
+| `run_dht_maintenance` | 60 minutes | Refresh stale DHT routing table buckets |
+| `run_session_rehandshake_scheduler` | 10 minutes | Check session ages; trigger 24hr re-handshake |
+
+### Session Re-handshake Scheduler
+
+The re-handshake scheduler checks all sessions every 10 minutes:
+
+```rust
+async fn run_session_rehandshake_scheduler(state: Arc<NodeState>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(600));
+    loop {
+        interval.tick().await;
+        let threshold = Duration::from_secs(
+            state.config.sessions.session_rehandshake_age_hours * 3600
+        );
+        for session in state.session_manager.list_sessions() {
+            if session.age() > threshold {
+                state.handshake_handler.handle_rehandshake_initiation(&session.id).await;
+            }
+        }
+    }
+}
+```
+
+### Path Table Cleanup
+
+Path table entries expire at session idle timeout. The single-domain and cross-domain tables are cleaned separately:
+
+```rust
+async fn run_path_table_cleanup(state: Arc<NodeState>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        interval.tick().await;
+        state.path_table.cleanup_expired();
+        // Cross-domain table only on bridge-capable nodes
+        if state.domain_bridge_manager.is_some() {
+            state.cross_domain_path_table.cleanup_expired();
+        }
+    }
+}
+```
