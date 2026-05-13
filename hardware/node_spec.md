@@ -1,6 +1,7 @@
 # BGP-X Node v1 Hardware Specification
 
 **Version**: 0.1.0-draft
+**License**: CERN-OHL-S v2
 
 ---
 
@@ -42,16 +43,17 @@ Any implementation claiming BGP-X Node v1 compliance MUST meet:
 
 | Capability | Minimum | Reference Implementation |
 |---|---|---|
-| CPU | Single or dual-core ARM Cortex-A53 or equivalent, ≥800 MHz | ARM Cortex-A53 @ 1.0 GHz (TBD final SoC) |
-| RAM | 256 MB (relay mode); 512 MB (domain bridge mode) | 512 MB LPDDR4 |
-| Storage | 2 GB persistent + 64 MB boot | 4 GB eMMC + 64 MB NAND |
+| CPU | Single or dual-core ARM Cortex-A53 or equivalent, ≥800 MHz | ARM Cortex-A53 @ 1.0–1.3 GHz |
+| RAM | 256 MB (relay mode); 512 MB (domain bridge mode) | 256–512 MB DDR4 / LPDDR4 |
+| Storage | 2 GB persistent + 64 MB boot | 4–8 GB eMMC + 64–128 MB NAND |
 | LoRa | SPI-connected LoRa transceiver (SX1261/SX1262 or equivalent) | SX1262 |
-| WiFi | 802.11s mesh capable (optional if LoRa-only configuration) | MT7601U or MT7612U module |
+| WiFi | 802.11s mesh capable (optional if LoRa-only configuration) | MT7915 (WiFi 6) or MT7612U (WiFi 5) |
 | BLE | BLE 5.0+ module (optional) | Standalone UART BLE module |
-| Power | Solar + LiPo/LiFePO4 battery input; OR PoE 802.3af minimum | Solar MPPT + 3.7V LiPo |
-| WAN (optional) | 1× 10/100/1000 Ethernet (for domain bridge/gateway mode) | Optional Ethernet port |
+| Power | Solar + LiPo/LiFePO4 battery input; OR PoE 802.3af minimum | Solar MPPT + 3.7V LiPo / LiFePO4 |
+| WAN (optional) | 1× 10/100/1000 Ethernet (for domain bridge/gateway mode) | 1× GbE (optional) |
 | USB | 1× USB 2.0+ (for additional adapters or satellite modem) | 1× USB 2.0 |
-| Linux support | Mainline Linux 5.15+ or vendor BSP | OpenWrt 23.05 / custom RTOS |
+| Security | Optional TPM 2.0 for hardware-bound keys | Infineon SLB9670 / SLB9672 TPM 2.0 |
+| Linux support | Mainline Linux 5.15+ or vendor BSP | OpenWrt 23.05 |
 
 **Note on memory**: 256 MB supports the BGP-X relay daemon with standard path_id tables (up to ~5,000 concurrent entries). 512 MB enables domain bridge operation with full cross-domain path_id table capacity (up to ~20,000 entries). Community contributors adding coverage without gateway function can use 256 MB.
 
@@ -171,7 +173,50 @@ Behavior: All radios active simultaneously. BGP-X daemon selects transport per-p
 
 ---
 
-## 5. Reference Hardware — Radios
+## 5. Reference Hardware — Compute
+
+### Primary Reference Platform (High Performance)
+
+| Component | Specification |
+|---|---|
+| SoC | MediaTek MT7981B (Filogic 820) |
+| CPU | ARM Cortex-A53 dual-core, 1.3 GHz |
+| RAM | 512 MB DDR4 |
+| Storage (OS/firmware) | 128 MB NAND flash |
+| Storage (data) | 8 GB eMMC (node database, reputation, DHT) |
+| Power | 5V DC via USB-C or PoE 802.3af |
+| Consumption | ~4W idle, ~6W full load |
+
+This platform provides maximum throughput and supports domain bridge and gateway modes with full session capacity. Identical to the Router v1 compute platform, optimized for outdoor deployment.
+
+### Low-Power Reference Platform (Solar Optimized)
+
+| Component | Specification |
+|---|---|
+| SoC | Allwinner H3/H5 or NXP i.MX8M Mini |
+| CPU | ARM Cortex-A53 quad-core, 800–1200 MHz |
+| RAM | 512 MB LPDDR4 |
+| Storage | 4 GB eMMC + SD card slot |
+| Power | 3.3–5V DC, solar + battery input |
+| Consumption | <500 mW idle (radios receive-only) |
+
+This platform is optimized for solar deployments where every milliwatt matters. Slightly lower throughput than MT7981B, but sufficient for LoRa-dominated traffic patterns.
+
+### Candidate Compute Platforms
+
+Evaluation criteria: power consumption, LoRa SPI integration, Linux BSP quality, cost, and availability.
+
+- NXP i.MX8M Mini (quad-core A53, very low power)
+- Allwinner H3/H5 (established OpenWrt support, low cost)
+- MediaTek MT7620 (proven OpenWrt compatibility, very low power)
+- Raspberry Pi Zero 2W (broad community support, easy prototyping)
+- Custom BGP-X SoC (future option — integrated LoRa + compute)
+
+All BGP-X Node v1 firmware is written to run on any of these platforms via OpenWrt Kconfig.
+
+---
+
+## 6. Reference Hardware — Radios
 
 ### LoRa Radio
 
@@ -191,12 +236,12 @@ Behavior: All radios active simultaneously. BGP-X daemon selects transport per-p
 
 | Parameter | Reference | Equivalent |
 |---|---|---|
-| Chipset | MT7612U (USB, 802.11ac) or embedded 802.11ax | Any Linux mac80211 802.11s capable chip |
+| Chipset | MT7915 (802.11ax/WiFi 6) or MT7612U (802.11ac) | Any Linux mac80211 802.11s capable chip |
 | Mode | IEEE 802.11s mesh | Required for WiFi mesh domain participation |
-| Interface | USB or SDIO or PCIe (chipset-dependent) | Platform-appropriate interface |
+| Interface | PCIe (MT7915) or USB (MT7612U) | Platform-appropriate interface |
 | Bands | 2.4 GHz and/or 5 GHz | Single band acceptable for low-cost |
 
-**Note on WiFi flexibility**: The WiFi radio is the most hardware-flexible component. The BGP-X Node v1 WiFi module can be MT7612U (USB dongle for maximum flexibility), an SDIO WiFi module (lower power), or an embedded 802.11ax chip (if cost-effective). The only requirement is mac80211 802.11s support in the Linux kernel. Community builders may use any compatible WiFi module with confirmed 802.11s support.
+**Flexibility**: The WiFi module can be MT7915 (high performance, integrated with MT7981B SoC), MT7612U (USB dongle), or any SDIO/embedded 802.11ax chip. The only requirement is mac80211 802.11s support in the Linux kernel.
 
 ### Bluetooth BLE (Optional)
 
@@ -205,32 +250,9 @@ Behavior: All radios active simultaneously. BGP-X daemon selects transport per-p
 | Version | BLE 5.0+ |
 | Interface | UART or USB |
 | Stack | BlueZ (Linux) |
-| BGP-X use | MESH_BEACON via BLE advertisement; BGP-X BLE transport for short-range mesh |
+| BGP-X use | MESH_BEACON via BLE advertisement; BGP-X BLE transport |
 
 BLE is optional and disabled by default. Enable with `transports = ["ble"]` in routing_domains config.
-
----
-
-## 6. Reference Hardware — Compute
-
-### Current Reference Platform (Pending Final SoC Selection)
-
-The BGP-X Node v1 compute platform is being finalized. The requirements are:
-
-- ARM Cortex-A53 single or dual-core at ≥800 MHz
-- 512 MB LPDDR4 RAM
-- Full Linux support (OpenWrt or Yocto)
-- Low idle power: <500 mW when all radios in receive-only mode
-- Wide-input power: 3.3V-5V from solar/battery; OR PoE 802.3af input
-
-**Candidate compute platforms** (evaluation in progress):
-- Custom ARM module based on NXP i.MX8M Mini (quad-core A53, very low power)
-- Allwinner H3/H5 (established OpenWrt support, low cost)
-- MT7620 (MediaTek, proven OpenWrt compatibility, very low power)
-- Raspberry Pi Zero 2W (broad community support, easy prototyping)
-- Custom BGP-X SoC (future option — integrated LoRa + compute)
-
-The final SoC will be determined by: power consumption, LoRa SPI integration, Linux BSP quality, cost, and availability. All BGP-X Node v1 firmware is written to run on any of these platforms via OpenWrt Kconfig.
 
 ---
 
@@ -247,7 +269,7 @@ The BGP-X Node v1 is solar-and-battery native. This is a first-class design requ
 CN3791 MPPT solar charge controller
          │
          ▼
-3000-5000 mAh LiPo battery (3.7V)
+3000-5000 mAh LiPo battery (3.7V) or LiFePO4 (3.2V)
          │
          ▼
 5V boost regulator → compute SoC
@@ -256,19 +278,19 @@ CN3791 MPPT solar charge controller
 3.3V LDO → LoRa SX1262, BLE module
          │
          ▼
-WiFi module (USB or SDIO power rail)
+WiFi module (USB or PCIe power rail)
 ```
 
-Power budget (typical LoRa + WiFi mesh + BLE, all active):
-- Idle (receive only): 1.5-2.5W
+**Power budget (typical LoRa + WiFi mesh + BLE, all active)**:
+- Idle (receive only): 1.5–2.5W
 - LoRa TX peak: +1.0W additional (150ms burst at +14 dBm)
 - WiFi TX peak: +2.0W additional (bursts during packet forwarding)
-- Maximum sustained: 4-6W
+- Maximum sustained: 4–6W
 
-With 3W solar panel: charging exceeds discharge at ≥6 hours daily sun. Battery provides overnight operation.
-With 6W solar panel: comfortable margin; suitable for cloudy conditions.
+**With 3W solar panel**: charging exceeds discharge at ≥6 hours daily sun. Battery provides overnight operation.
+**With 6W solar panel**: comfortable margin; suitable for cloudy conditions.
 
-Battery capacity for overnight operation at 2W average: 3000 mAh × 3.7V × 0.9 (efficiency) = 9.99 Wh ÷ 2W = ~5 hours. **Minimum 6000 mAh LiPo recommended for reliable 24/7 off-grid operation with 3W panel**.
+**Battery capacity for overnight operation at 2W average**: 3000 mAh × 3.7V × 0.9 (efficiency) = 9.99 Wh ÷ 2W = ~5 hours. **Minimum 6000 mAh LiPo recommended for reliable 24/7 off-grid operation with 3W panel**.
 
 ### PoE Power Option
 
@@ -295,22 +317,86 @@ For outdoor deployments in cold climates: LiFePO4 strongly recommended. LiPo los
 ### Default Enclosure (IP67 Outdoor)
 
 | Attribute | Specification |
-|---|---|
+|---|---|---|
 | Material | UV-stabilized ABS or polycarbonate |
 | Dimensions | 120 × 80 × 50 mm (reference) |
 | IP rating | IP67 (dust-tight; 30-minute submersion to 1m) |
 | Temperature | -40°C to +85°C |
-| Mounting | Pole clamp (18-50mm dia), wall bracket, DIN rail |
-| Antenna ports | 1× SMA (LoRa), 1-2× RP-SMA (WiFi), optional N-type for high-gain LoRa |
+| Mounting | Pole clamp (18–50mm dia), wall bracket, DIN rail |
+| Antenna ports | 1× SMA (LoRa), 1–2× RP-SMA (WiFi), optional N-type for high-gain LoRa |
 | Cable entry | M12 waterproof cable gland for Ethernet + power |
 
 ### Internal Mounting
 
 Core PCB mounts inside enclosure on standoffs. Solar charge controller and battery mounted in base section. Top section: main PCB with radios and antennas. Separation prevents battery heat from affecting radio performance.
 
+### Product Variants
+
+| Variant | Description | Enclosure |
+|---|---|---|
+| BGP-X Node v1 Indoor | Standard relay/entry | ABS plastic, desktop |
+| BGP-X Node v1 Outdoor | Weatherproof relay | IP67 polycarbonate, pole mount |
+| BGP-X Node v1 Industrial | ATEX-rated (hazardous area) | ATEX Ex e IIC |
+| BGP-X Node v1 Mobile | Vehicle-mounted | ABS, shock-mount |
+
+All variants share the same PCB. Variants differ in enclosure, power input, and operating temperature range.
+
 ---
 
-## 9. Software Platform
+## 9. Security — TPM-Based Key Storage
+
+The Node v1 supports optional TPM 2.0 for hardware-bound cryptographic keys.
+
+| Component | Specification |
+|---|---|
+| TPM Module | Infineon SLB9670 / SLB9672 |
+| Interface | SPI |
+| Features | Hardware-bound Ed25519 keys, secure boot measurement, HWRNG |
+
+### TPM Key Operations
+
+If TPM is present, the node's Ed25519 private key:
+- Generated on TPM (never leaves hardware)
+- All signing operations performed within TPM
+- Hardware attack resistant (JTAG, SPI bus attacks blocked)
+- Key survives OS reinstall (stored in TPM NVIndex)
+- Key lost only on TPM clear or hardware destruction
+
+BGP-X daemon communicates with TPM via tpm2-tools and tpm2-tss:
+
+```bash
+# Generate node key in TPM
+tpm2_create -G ecc256 -u /etc/bgpx/node_key.pub -r /etc/bgpx/node_key_ctx.priv
+
+# Configure BGP-X to use TPM
+[node]
+private_key_storage = "tpm2"
+tpm2_key_context = "/etc/bgpx/node_key_ctx.priv"
+tpm2_key_public = "/etc/bgpx/node_key.pub"
+```
+
+**Note on Cost Reduction**: The TPM is optional for the Node v1 to reduce BOM cost for community deployments. Without TPM, keys are stored in encrypted eMMC (software keystore). TPM is strongly recommended for domain bridge and gateway nodes.
+
+---
+
+## 10. PCB Design
+
+**Layer stackup**: 4-layer FR4
+- Layer 1: Signal + components
+- Layer 2: Ground plane
+- Layer 3: Power plane (3.3V, 5V)
+- Layer 4: Signal
+
+**Key design considerations**:
+- SX1262 LoRa: keep RF trace short; 50Ω controlled impedance; ground plane cutout under antenna connector
+- MT7981B / H3 / i.MX8M: DDR4 trace length matching required (±5 mil)
+- TPM 2.0: SPI bus isolated from main SPI; dedicated ground
+
+**Open hardware files**: KiCad project files, Gerbers, BOM, pick-and-place released under CERN-OHL-S v2.
+
+---
+
+## 11. Software Platform
 
 Same bgpx-node daemon as BGP-X Router v1. Same bgpx-cli. Same configuration format.
 
@@ -347,20 +433,20 @@ This ensures the node remains operational (forwarding BGP-X traffic) even in ext
 
 ---
 
-## 10. BGP-X Node v1 vs BGP-X Router v1
+## 12. BGP-X Node v1 vs BGP-X Router v1
 
 | Feature | BGP-X Router v1 | BGP-X Node v1 |
 |---|---|---|
 | Target user | Home/office user | Community contributor |
 | Replaces home router | Yes | No |
-| LAN switching | 3-4× GbE ports | Optional (1× WAN only) |
+| LAN switching | 3–4× GbE ports | Optional (1× WAN only) |
 | NAT/DHCP for LAN | Yes | Optional |
 | TPM 2.0 | Yes | Optional (cost reduction) |
-| RAM | 512 MB standard | 256-512 MB |
+| RAM | 512 MB standard | 256–512 MB |
 | Power | PoE or DC | Solar + battery native; PoE optional |
 | Default enclosure | Desktop or outdoor | Outdoor IP67 (default) |
 | LoRa | Yes (integrated SX1262) | Yes (integrated SX1262) |
-| WiFi mesh | Yes (MT7915 WiFi 6) | Yes (lower-tier WiFi module) |
+| WiFi mesh | Yes (MT7915 WiFi 6) | Yes (MT7915 or lower-tier module) |
 | BLE | Optional (USB) | Yes (integrated UART module) |
 | Full BGP-X daemon | Yes | Yes (same binary) |
 | Domain bridge capable | Yes | Yes (with WAN option) |
@@ -371,13 +457,13 @@ This ensures the node remains operational (forwarding BGP-X traffic) even in ext
 
 ---
 
-## 11. Comparison to Old "BGP-X Amplifier v1" Concept
+## 13. Comparison to Old "BGP-X Amplifier v1" Concept
 
 The original BGP-X specification included a "BGP-X Amplifier v1" on STM32H7 as a pure LoRa range extender with no BGP-X routing.
 
 **The BGP-X Node v1 replaces and supersedes this concept entirely.**
 
-Why: a pure LoRa PHY-level relay with no BGP-X crypto is technically simpler but introduces a security hole — traffic is relayed in an unencrypted intermediate state at the relay's PHY interface. BGP-X Node v1 in Range Extension mode provides all the coverage benefits of a "dumb" amplifier while maintaining full end-to-end BGP-X encryption at every hop.
+**Why**: A pure LoRa PHY-level relay with no BGP-X crypto is technically simpler but introduces a security hole — traffic is relayed in an unencrypted intermediate state at the relay's PHY interface. BGP-X Node v1 in Range Extension mode provides all the coverage benefits of a "dumb" amplifier while maintaining full end-to-end BGP-X encryption at every hop.
 
 The STM32H7 is too constrained for the BGP-X daemon (requires Linux for async I/O, full crypto, DHT). Community contributors who want to extend range should use the BGP-X Node v1 in Range Extension mode.
 
@@ -385,7 +471,7 @@ The STM32H7 is too constrained for the BGP-X daemon (requires Linux for async I/
 
 ---
 
-## 12. Bill of Materials — Approximate Component Cost (Volume)
+## 14. Bill of Materials — Approximate Component Cost (Volume)
 
 | Component | Approximate Cost |
 |---|---|
