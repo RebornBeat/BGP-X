@@ -21,11 +21,11 @@ All BGP-X firmware is written against hardware abstraction layers. The BGP-X dae
 
 ## 2. Hardware Ecosystem Overview
 
-BGP-X hardware is organized into four categories:
+BGP-X hardware is organized into four categories.
 
 ### Category 1: BGP-X Router v1 — End User AIO
 
-**Target**: Individual users, families, home offices, small organizations
+**Target**: Individual users, families, home offices, small organizations.
 
 The BGP-X Router v1 is the **all-in-one primary product**. It replaces a standard home or office router entirely. A user purchases one BGP-X Router v1 and it handles everything:
 
@@ -48,7 +48,7 @@ A user who owns a BGP-X Router v1 needs **no additional hardware** for any of th
 
 ### Category 2: BGP-X Node v1 — Community Contributor
 
-**Target**: Community mesh contributors, outdoor relay operators, range extenders, organizations expanding mesh coverage
+**Target**: Community mesh contributors, outdoor relay operators, range extenders, organizations expanding mesh coverage.
 
 The BGP-X Node v1 is a compact, multi-radio BGP-X node designed for community deployment. Unlike the Router v1 (which replaces a home router), the Node v1 is designed to be **added to an existing network** to expand BGP-X mesh coverage.
 
@@ -74,7 +74,7 @@ This device is what community members deploy on rooftops, masts, in distribution
 
 ### Category 3: BGP-X Gateway v1 — Provider Infrastructure
 
-**Target**: ISPs, hosting providers, enterprise operators, organizations running public BGP-X infrastructure
+**Target**: ISPs, hosting providers, enterprise operators, organizations running public BGP-X infrastructure.
 
 The BGP-X Gateway v1 is high-throughput provider infrastructure. It is NOT a consumer device — it is for operators who want to run public exit nodes, high-capacity domain bridge nodes, or backbone relay nodes.
 
@@ -95,7 +95,7 @@ A typical deployment: an operator colocates a BGP-X Gateway v1 in an EU datacent
 
 ### Category 4: BGP-X OpenWrt Package — Compatible Third-Party Hardware
 
-**Target**: Users who already own compatible OpenWrt routers; community members wanting to contribute without new hardware purchase
+**Target**: Users who already own compatible OpenWrt routers; community members wanting to contribute without new hardware purchase.
 
 BGP-X runs as a software package on any compatible OpenWrt 23.05+ router. No hardware purchase required beyond what the user already owns.
 
@@ -167,29 +167,29 @@ All firmware targets run the same bgpx-node daemon binary built for the appropri
 
 ---
 
-## 6. Power Summary
+## 6. Power Requirements Summary
 
-| Device | Idle | Peak | Primary Power |
-|---|---|---|---|
-| BGP-X Router v1 (desktop) | 5W | 15W | 12V DC or PoE 802.3at |
-| BGP-X Router v1 (outdoor) | 5W | 15W | PoE 802.3at |
-| BGP-X Node v1 (LoRa only) | 0.5W | 2W | Solar + LiPo battery |
-| BGP-X Node v1 (WiFi + LoRa) | 2W | 8W | Solar + LiPo or PoE |
-| BGP-X Node v1 (all radios) | 3W | 12W | PoE 802.3at or solar |
-| BGP-X Gateway v1 | 15W | 40W | AC 100-240V / PoE 802.3bt |
+| Device | Idle Power | Max Power | PoE | Solar |
+|---|---|---|---|---|
+| BGP-X Router v1 (Desktop) | 5W | 15W | 802.3at (30W) | Compatible (12V) |
+| BGP-X Router v1 (Outdoor) | 5W | 15W | 802.3at | PoE 802.3at |
+| BGP-X Node v1 (LoRa only) | 0.5W | 2W | No | Solar + LiPo battery |
+| BGP-X Node v1 (WiFi + LoRa) | 2W | 8W | No | Solar + LiPo or PoE |
+| BGP-X Node v1 (All radios) | 3W | 12W | PoE 802.3at or solar | PoE 802.3at or solar |
+| BGP-X Gateway v1 | 15W | 40W | AC 100-240V / PoE 802.3bt | AC/POE |
 
 ---
 
-## 7. Environmental Ratings
+## 7. Enclosure and Environmental Ratings
 
-| Device | IP Rating | Temperature |
-|---|---|---|
-| BGP-X Router v1 (Desktop carrier) | IP20 | 0°C to +50°C |
-| BGP-X Router v1 (Outdoor IP67 carrier) | IP67 | -40°C to +70°C |
-| BGP-X Router v1 (DIN Rail carrier) | IP20 | -20°C to +70°C |
-| BGP-X Node v1 | IP67 | -40°C to +85°C |
-| BGP-X Gateway v1 (1U Rack) | IP20 | 0°C to +50°C |
-| BGP-X Gateway v1 (Outdoor) | IP65 | -20°C to +60°C |
+| Device | IP Rating | Temperature | Mounting |
+|---|---|---|---|
+| BGP-X Router v1 (Desktop carrier) | IP20 | 0°C to +50°C | Tabletop |
+| BGP-X Router v1 (Outdoor IP67 carrier) | IP67 | -40°C to +70°C | Pole/Mast/Wall |
+| BGP-X Router v1 (DIN Rail carrier) | IP20 | -20°C to +70°C | DIN Rail |
+| BGP-X Node v1 | IP67 | -40°C to +85°C | Pole/Mast/Wall |
+| BGP-X Gateway v1 (1U Rack) | IP20 | 0°C to +50°C | 19" Rack |
+| BGP-X Gateway v1 (Outdoor) | IP65 | -20°C to +60°C | Pole/Wall |
 
 ---
 
