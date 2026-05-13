@@ -1,0 +1,23 @@
+CERN Open Hardware Licence Version 2 - Strongly Reciprocal
+
+This source is subject to the terms of the CERN Open Hardware Licence
+Version 2 - Strongly Reciprocal. A copy of the licence can be found at:
+
+    https://ohwr.org/cern_ohl_s_v2.txt
+
+or in the LICENSE-HARDWARE file accompanying this project.
+
+Copyright (c) 2026 RebornBeat
+
+You may redistribute and modify this source and make products using it
+under the terms of the CERN-OHL-S-2.0 (https://ohwr.org/cern_ohl_s_v2.txt).
+
+This source is distributed WITHOUT ANY EXPRESS OR IMPLIED WARRANTY,
+INCLUDING OF MERCHANTABILITY, SATISFACTORY QUALITY AND FITNESS FOR A
+PARTICULAR PURPOSE. Please see the CERN-OHL-S-2.0 for applicable
+conditions.
+
+Source location: https://github.com/rebornbeat/bgp-x
+
+As per the terms of the CERN-OHL-S-2.0, any derivative works or modifications
+to this hardware design must be released under the same licence.
