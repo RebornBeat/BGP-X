@@ -2,6 +2,8 @@
 
 **BGP-X** is a router-level privacy overlay network and inter-protocol domain router. It runs on your network router and protects all connected devices transparently — or on a standalone device, or embedded directly in an application.
 
+BGP-X routes traffic across routing domains: clearnet (BGP-routed internet, including all satellite internet services), BGP-X overlay, and mesh islands (WiFi 802.11s, LoRa, Bluetooth). Any domain can reach any other domain through domain bridge nodes. There is no required domain ordering. Paths may traverse any combination of domains, any number of times, with no protocol-level maximum on total hops.
+
 BGP-X does not replace the Border Gateway Protocol. It uses the public internet as one of several transport substrates while implementing a parallel, privacy-first routing plane that is identity-based, multi-hop by default, cryptographically enforced at every layer, and capable of routing between multiple network domains without restriction.
 
 ---
@@ -43,8 +45,26 @@ BGP-X is a **router-level privacy overlay network and inter-protocol domain rout
 - **Pluggable transport**: obfuscates BGP-X traffic patterns to resist ISP-level blocking
 - **Mesh transport native**: operates without any ISP connection via WiFi 802.11s, LoRa radio, Bluetooth, and other transports
 - **Cover traffic**: COVER packets are cryptographically indistinguishable from RELAY packets to external observers — both use the session key
-- **Geographic plausibility scoring**: RTT-based verification of node region claims (no external database required)
+- **Geographic plausibility scoring**: RTT-based verification of node region claims (no external database required) — OPTIONAL feature; jurisdiction declaration is opt-in
 - **path_id return routing**: 8-byte random path identifier enables return traffic routing without leaking path composition
+- **.bgpx native addressing**: self-authenticating service addresses with human-readable short names via Name Registry DHT
+- **HTTP/2 native transport**: BGP-X native services use HTTP/2 over BGP-X streams for efficient multiplexing on high-latency paths
+
+---
+
+## Three Equal Entry Points
+
+BGP-X provides three equal first-class entry points to the network:
+
+| Entry Point | Description | Hardware |
+|---|---|---|
+| **Clearnet** | BGP-routed internet (fiber, cellular, satellite internet — all are clearnet) | Any internet-connected device |
+| **BGP-X Overlay** | Onion-encrypted relay network | Any BGP-X node |
+| **Mesh Islands** | Community radio networks (WiFi mesh, LoRa, BLE) | BGP-X Router v1, BGP-X Node v1 |
+
+No entry point is primary. A mesh-only user in a remote village and a fiber-connected user in a city participate in the same network. A clearnet client with no mesh hardware can reach services hosted in mesh islands via domain bridge nodes.
+
+**Satellite internet (Starlink, Iridium, Inmarsat, etc.) is clearnet.** Commercial satellite services provide BGP-routed IP connectivity. From BGP-X's perspective, satellite internet is clearnet domain type 0x00000001 — the same as fiber or cellular, just with higher latency. Domain type 0x00000005 is reserved for a future BGP-X-native satellite network, not for current commercial satellite services.
 
 ---
 
@@ -70,16 +90,46 @@ A clearnet user with no BGP-X router can reach a mesh island service. A mesh use
 
 ---
 
+## .bgpx Domain System
+
+BGP-X provides a native service addressing system equivalent to Tor's .onion:
+
+- **Self-authenticating addresses**: `a3f2b9c1....bgpx` — the address IS the service's Ed25519 public key
+- **Human-readable names**: `community-news.bgpx` via BGP-X Name Registry DHT
+- **Cross-domain access**: clearnet users can reach mesh island services via domain bridge nodes
+- **Latency-adaptive**: BGP-X Browser handles LoRa-class paths with batched resource loading and progressive rendering
+
+`.bgpx` services use HTTP/2 over BGP-X streams. HTTP/2 multiplexing reduces round-trips on high-latency paths. HTTP/3 is used only at exit nodes connecting to HTTP/3 clearnet servers — not within the BGP-X overlay.
+
+---
+
+## HTTP/2 for .bgpx Services
+
+BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**.
+
+HTTP/2 is selected over HTTP/3 because:
+- BGP-X already provides reliable ordered delivery at the session layer
+- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
+- HTTP/3's QUIC would add redundant reliability and congestion control layers
+
+HTTP/3 is used at exit nodes when connecting to HTTP/3 clearnet servers — standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
+
+For LoRa paths: HTTP/2 multiplexing is critical. Each round-trip costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
+
+---
+
 ## Deployment Modes
 
-| Mode | Description | ISP Required |
-|---|---|---|
-| Dual-Stack Router | BGP + BGP-X coexist; routing policy decides per flow | Yes |
-| BGP-X Only Router | All LAN traffic through overlay; no bypass possible for LAN devices | Yes (as transport for overlay) |
-| Standalone Device | BGP-X daemon on single device | Yes |
-| Mesh Node | No ISP; mesh transport only (WiFi mesh, LoRa, Bluetooth) | No |
-| Gateway Node | Bridges mesh network to clearnet internet | Yes (at gateway) |
-| Broadcast Amplifier | Range extension only; no routing intelligence | No |
+| Mode | Description | Hardware | ISP Required |
+|---|---|---|---|
+| Dual-Stack Router | BGP + BGP-X coexist; routing policy decides per flow | BGP-X Router v1 | Yes |
+| BGP-X Only Router | All LAN traffic through overlay; no bypass for LAN devices | BGP-X Router v1 | Yes |
+| Standalone Device | BGP-X daemon on laptop/desktop/server | Any computer | Yes |
+| Mesh Relay | No ISP; mesh transport only | BGP-X Node v1 or Router v1 | No |
+| Community Gateway | Bridges mesh island to clearnet | BGP-X Node v1 or Router v1 | Yes (at gateway) |
+| Range Extension | Coverage extension with full BGP-X encryption | BGP-X Node v1 in Range Extension mode | No |
+
+**Note on Range Extension**: The earlier concept of a "Broadcast Amplifier" has been retired. BGP-X Node v1 in Range Extension mode provides equivalent coverage benefits while maintaining full BGP-X onion encryption at every hop. This is NOT a "dumb repeater" — it runs the complete bgpx-node daemon, prioritizing forwarding over session origination.
 
 ---
 
@@ -90,6 +140,23 @@ A clearnet user with no BGP-X router can reach a mesh island service. A mesh use
 | Standard Application | Any app that doesn't use the SDK; transparently protected via router | None — just connect to the network |
 | BGP-X Native Application | Uses the SDK to control paths, pools, domains, ECH; can register as native services | SDK integration |
 | Configuration Client | bgpx-cli and GUI tools; connects to daemon via Control Socket | Socket access |
+
+---
+
+## Hardware Ecosystem
+
+BGP-X provides purpose-built hardware for every participant tier:
+
+| Hardware | Target User | Key Characteristics |
+|---|---|---|
+| **BGP-X Router v1** | End user | All-in-one; replaces home router; WiFi + LoRa + BLE; outdoor IP67 option; satellite WAN via USB |
+| **BGP-X Node v1** | Community contributor | Compact outdoor node; solar-powered option; runs complete bgpx-node daemon; domain bridge capable |
+| **BGP-X Gateway v1** | Provider | High-throughput exit node; SFP+ uplink; 1 GB RAM; datacenter deployment |
+| **BGP-X Client Node** | Individual endpoint | Low-cost (LILYGO T3 based); battery-powered; personal connectivity; no routing for others |
+| **BGP-X Adapter/Dongle** | USB LoRa modem | USB-powered; acts as LoRa interface for existing computers |
+| **BGP-X OpenWrt Package** | Existing hardware | Software-only for compatible third-party routers |
+
+**Key clarification**: BGP-X Node v1 runs the **complete** bgpx-node daemon — the same software as BGP-X Router v1. The difference is form factor and deployment context, not capability. It is NOT a "lite" or partial device.
 
 ---
 
@@ -113,6 +180,8 @@ BGP-X enables a spectrum of BGP independence depending on deployment:
 - **Level 5**: Wide-area mesh with aerial nodes — near-total BGP independence for intra-network
 - **Level 6**: Maximum — BGP-X replaces ISP routing decisions; honest limit: cannot replace physical infrastructure
 
+**Honest assessment**: BGP-X replaces ISP dependency and routing decisions, but cannot replace physical infrastructure (fiber, towers, spectrum).
+
 ---
 
 ## Prior Art
@@ -126,7 +195,7 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 - **I2P**: garlic routing for anonymous services
 - **Meshtastic**: LoRa mesh hardware and protocol
 
-**What BGP-X uniquely combines**: multi-hop onion routing + cross-domain inter-protocol routing + mesh transport native + clearnet exit model + decentralized unified DHT + pool-based trust domains + N-hop unlimited path construction + hardware targets — unified into one coherent system.
+**What BGP-X uniquely combines**: multi-hop onion routing + mesh transport native + clearnet exit model + decentralized unified DHT + pool-based trust domains + hardware targets + cross-domain inter-protocol routing + N-hop unlimited path construction — unified into one coherent system.
 
 ---
 
@@ -151,8 +220,40 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 | DHT Pools | No | Yes — multi-pool paths, double-exit, trust tiers |
 | ECH at exit | No | Yes — hides SNI when destination supports it |
 | Mesh transport | No | Yes — WiFi mesh, LoRa, Bluetooth |
-| Hardware ecosystem | No | Yes — unified BGP-X Node platform |
+| Hardware ecosystem | No | Yes — Router v1, Node v1, Gateway v1, Client Node, Adapter |
 | Cross-domain routing | No | Yes — any combination of network domains |
+| .bgpx native services | No | Yes — self-authenticating addresses with Name Registry |
+| HTTP/2 native | No | Yes — for .bgpx services |
+| N-hop unlimited | No (fixed 3) | Yes — no protocol maximum |
+| Satellite clarification | N/A | Yes — satellite internet = clearnet domain |
+
+---
+
+## How BGP-X Surpasses Tor
+
+### 1. No central directory authority
+
+Tor's directory authorities are a known attack surface. BGP-X uses a fully decentralized DHT-based node discovery system with signed, verifiable node advertisements. There is no single server that, if compromised, degrades the anonymity of the entire network.
+
+### 2. Protocol-level, not application-level
+
+Tor is primarily a browser/SOCKS proxy. BGP-X is a full network layer. Any application, daemon, or system service can route through BGP-X without modification.
+
+### 3. Configurable path length and trust model
+
+Tor hardcodes 3-hop circuits as a balance between anonymity and latency. BGP-X exposes path length, hop selection policy, and relay trust thresholds as first-class configuration. High-risk use cases can extend to 5+ hops with geographic diversity enforcement.
+
+### 4. Native multiplexing
+
+Tor creates one circuit per destination. BGP-X multiplexes multiple streams over a single path, dramatically improving efficiency for multi-connection workloads (APIs, browsers, services).
+
+### 5. Router firmware integration
+
+BGP-X is designed to run on commodity routers. This means all traffic from all devices on a network segment routes through BGP-X without per-device configuration — the same model as a VPN gateway, but with genuine unlinkability.
+
+### 6. Gateway architecture for full internet reach
+
+BGP-X exits to the public internet through designated gateway nodes that are explicitly audited and signed. This makes exit policy transparent, accountable, and configurable — unlike Tor exit nodes which are operated by volunteers with no formal accountability structure.
 
 ---
 
@@ -175,6 +276,19 @@ BGP-X builds on significant prior work. It does not claim to be the first in any
 
 ---
 
+## Geographic Plausibility — OPTIONAL
+
+Geographic plausibility scoring is an **OPTIONAL** reputation signal:
+
+- If a node declares a jurisdiction: geo plausibility scoring applies
+- If a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
+- Nodes are NOT required to declare jurisdiction
+- Declaring jurisdiction is an opt-in privacy/convenience tradeoff
+
+Satellite-connected nodes are **exempt** from geo plausibility scoring because satellite terminal IPs may be assigned from distant ground stations.
+
+---
+
 ## Known Limitations
 
 BGP-X is explicit about what it does not guarantee:
@@ -187,6 +301,21 @@ BGP-X is explicit about what it does not guarantee:
 - **Compromised device**: BGP-X cannot protect traffic from malware on your device
 - **Cross-domain bridge availability**: if no bridge node exists between two domains, cross-domain connectivity is not possible for that pair
 - **No legal protection**: BGP-X does not make illegal activities legal
+- **LoRa paths have high latency**: LoRa paths introduce 500ms-5s latency per round-trip. Standard browsers feel slow. BGP-X Browser handles this gracefully with batched loading and progressive rendering
+- **Satellite latency**: GEO satellite paths add 600ms+ RTT. Suitable for non-interactive traffic; challenging for real-time applications
+- **No post-quantum cryptography (v1)**: Current version uses classical cryptography. Post-quantum upgrade planned for future version
+
+---
+
+## What BGP-X Is Not
+
+- ❌ A replacement for BGP (the Border Gateway Protocol)
+- ❌ A VPN (VPNs shift trust to a single provider; BGP-X distributes it)
+- ❌ A Tor fork (fundamentally different architecture, protocol, and threat model)
+- ❌ An anonymizing proxy (operates at the network layer, not application layer)
+- ❌ A silver bullet (see Known Limitations above)
+- ❌ A per-application tool (BGP-X runs on the router and protects all devices)
+- ❌ The first mesh network (builds on significant prior art)
 
 ---
 
@@ -199,11 +328,14 @@ BGP-X is explicit about what it does not guarantee:
 ├── CHANGELOG.md                — Version history
 ├── CONTRIBUTING.md             — Contribution guidelines
 ├── CODE_OF_CONDUCT.md          — Community standards
-├── LICENSE                     — MIT
+├── LICENSE                     — MIT (code)
+├── LICENSE-HARDWARE            — CERN-OHL-S v2 (hardware)
+├── LICENSE-DOCS                — CC BY 4.0 (documentation)
 ├── SECURITY.md                 — Vulnerability reporting
 ├── /docs                       — User-facing documentation
+│   └── /user_guide             — Setup guides for each deployment mode
 ├── /protocol                   — Protocol specification
-│   └── routing_domains.md      — Cross-domain routing (new)
+│   └── routing_domains.md      — Cross-domain routing specification
 ├── /control-plane              — Routing logic and node management
 ├── /data-plane                 — Packet forwarding and encryption
 ├── /node                       — Node daemon specification
@@ -216,6 +348,7 @@ BGP-X is explicit about what it does not guarantee:
 ├── /deployment                 — Deployment and operations guides
 ├── /production                 — SOPs, certification, release
 ├── /hardware                   — Hardware specifications
+├── /application                — BGP-X Browser, native app framework, SDK integration
 └── /legal                      — Liability and privacy documentation
 ```
 
@@ -235,6 +368,7 @@ Phase plan:
 - [x] Mesh architecture
 - [x] Cross-domain routing (inter-protocol domain router model)
 - [x] Hardware specification
+- [x] Application layer (BGP-X Browser, native apps)
 - [ ] Reference implementation (Rust)
 - [ ] Testnet
 - [ ] Mainnet
@@ -243,4 +377,18 @@ Phase plan:
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+- **Code**: MIT License. See [LICENSE](./LICENSE).
+- **Hardware**: CERN-OHL-S v2. See [LICENSE-HARDWARE](./LICENSE-HARDWARE).
+- **Documentation**: CC BY 4.0. See [LICENSE-DOCS](./LICENSE-DOCS).
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](./SECURITY.md).
