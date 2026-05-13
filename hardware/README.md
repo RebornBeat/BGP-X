@@ -21,7 +21,20 @@ All BGP-X firmware is written against hardware abstraction layers. The BGP-X dae
 
 ## 2. Hardware Ecosystem Overview
 
-BGP-X hardware is organized into four categories.
+BGP-X hardware is organized into six categories, spanning from infrastructure-grade routing nodes to low-cost client endpoints.
+
+### Hardware Roles Summary
+
+| Role | Function | Form Factor | Tier |
+|---|---|---|---|
+| BGP-X Router v1 | End-user AIO; replaces home router | Desktop / Outdoor IP67 | Tier 1 |
+| BGP-X Node v1 | Community mesh relay, domain bridge | Outdoor IP67 | Tier 1 |
+| BGP-X Gateway v1 | Provider exit/relay infrastructure | Rack / Outdoor | Tier 1 |
+| BGP-X Client Node | Low-cost mesh endpoint | Handheld / sensor mount | Tier 2 |
+| BGP-X Adapter/Dongle | USB LoRa modem for existing computers | USB dongle | Tier 3 |
+| OpenWrt Package | Software-only for compatible routers | Any | Software |
+
+---
 
 ### Category 1: BGP-X Router v1 — End User AIO
 
@@ -93,7 +106,79 @@ A typical deployment: an operator colocates a BGP-X Gateway v1 in an EU datacent
 
 ---
 
-### Category 4: BGP-X OpenWrt Package — Compatible Third-Party Hardware
+### Category 4: BGP-X Client Node — Low-Cost Mesh Endpoint (Tier 2)
+
+**Target**: Individual users, sensor deployments, portable field operation, IoT devices, community members contributing personal endpoints without routing for others.
+
+The BGP-X Client Node is a **low-cost, battery-powered endpoint** for connecting to BGP-X mesh networks. It does not route traffic for others. It is designed for individual users, sensors, and portable use.
+
+**Reference Hardware**: LILYGO T3S3, LILYGO T-Beam, LILYGO T-Echo, Heltec V3, RAK WisBlock 4631. These are ESP32-S3 or nRF52840 based development boards with integrated SX1262 LoRa radios.
+
+Key characteristics:
+- **Microcontroller-based**: ESP32-S3 (Xtensa LX7, 240 MHz) or nRF52840 (ARM Cortex-M4)
+- **Insufficient for full bgpx-node daemon**: Runs BGP-X Client Firmware — a subset implementation
+- **Battery-native**: Integrated LiPo charging; solar panel input
+- **Low cost**: $25-40 retail for reference hardware
+- **No routing for others**: Endpoint only; does not participate in DHT storage or relay traffic
+
+**What the Client Node CAN do**:
+- Connect to a BGP-X mesh island as a client
+- Send and receive BGP-X encrypted traffic
+- Query the DHT (no storage)
+- Request paths to services
+- Operate on battery for extended periods
+
+**What the Client Node CANNOT do**:
+- Route traffic for other nodes
+- Store DHT records
+- Participate as a relay in BGP-X paths
+- Run the full bgpx-node daemon (insufficient RAM/CPU)
+
+**Firmware**: BGP-X Client Firmware (ESP-IDF or Arduino framework). Implements client-side BGP-X protocol only.
+
+**Full specification**: `client_node_spec.md`
+
+---
+
+### Category 5: BGP-X Adapter/Dongle — USB LoRa Modem (Tier 3)
+
+**Target**: Users with existing computers (laptops, desktops, servers) who want to connect to a BGP-X mesh island without purchasing dedicated routing hardware.
+
+The BGP-X Adapter is a **USB dongle that acts as a LoRa radio modem**. It contains no routing intelligence. The host computer runs the full BGP-X daemon; the dongle handles only LoRa transmission and reception.
+
+Key characteristics:
+- **Form factor**: USB-A or USB-C dongle
+- **Core hardware**: ESP32-S3 or nRF52840
+- **Radio**: SX1262 LoRa transceiver
+- **Interface**: USB CDC-ACM (virtual serial port) or USB HID
+- **Cost**: $15-25 target
+- **Firmware**: BGP-X Modem Firmware — a minimal binary that accepts AT-style commands for TX/RX
+
+**How it works**:
+```
+Host Computer (bgpx-node daemon)
+         │
+         │ USB serial (CDC-ACM)
+         ▼
+BGP-X Adapter (ESP32-S3 + SX1262)
+         │
+         │ LoRa radio
+         ▼
+BGP-X Mesh Island
+```
+
+The host computer handles all crypto, DHT queries, path construction, and session management. The adapter is a transparent pipe to the LoRa radio. This allows any laptop or server with a USB port to become a BGP-X mesh client or domain bridge node (when combined with clearnet WAN on the host).
+
+**Use cases**:
+- Developer testing BGP-X on a desktop workstation
+- User with a laptop connecting to a mesh island via LoRa
+- Turning an OpenWrt router without LoRa into a domain bridge node
+
+**Full specification**: `adapter_spec.md`
+
+---
+
+### Category 6: BGP-X OpenWrt Package — Compatible Third-Party Hardware
 
 **Target**: Users who already own compatible OpenWrt routers; community members wanting to contribute without new hardware purchase.
 
@@ -113,7 +198,25 @@ Capabilities with USB adapters:
 
 ---
 
-## 3. Hardware Selection Guide
+## 3. Commercial Hardware (Recommended)
+
+For operators not building custom hardware, these commercial devices run BGP-X firmware:
+
+| Device | Tier | Best For |
+|---|---|---|
+| GL.iNet GL-MT6000 (Flint 2) | Tier 1 | Gateway, high-throughput relay |
+| GL.iNet GL-MT3000 (Beryl AX) | Tier 1 | Relay, indoor node |
+| GL.iNet GL-AXT1800 (Slate AX) | Tier 1 | Relay, travel gateway |
+| Banana Pi BPi-R3 | Tier 1 | High-performance relay |
+| GL.iNet GL-AR750S (Slate) | Tier 2 | Lightweight client |
+| Raspberry Pi 4 / 5 | Tier 1 | Standalone relay, development |
+| x86 mini PC | Tier 1 | High-performance relay, gateway |
+
+See `compatible_hardware.md` for complete list with specifications and installation notes.
+
+---
+
+## 4. Hardware Selection Guide
 
 ### I want to protect my home network and all my devices
 
@@ -139,9 +242,51 @@ Capabilities with USB adapters:
 
 → **BGP-X Node v1** in Range Extension mode with LoRa radio only. Mount at elevation. Solar-powered. Forwards BGP-X traffic between LoRa peers.
 
+### I want a portable device to connect to the mesh from my laptop
+
+→ **BGP-X Client Node (Tier 2)** or **BGP-X Adapter (Tier 3)**. The Client Node is a standalone battery-powered device. The Adapter plugs into your laptop's USB port. Both provide LoRa connectivity to the mesh without routing for others.
+
+### I want to deploy a sensor or IoT device on the mesh
+
+→ **BGP-X Client Node (Tier 2)**. Low-cost, battery or solar powered, runs client firmware only. Ideal for sensors, environmental monitoring, or asset tracking on a BGP-X mesh island.
+
 ---
 
-## 4. Satellite WAN Integration
+## 5. Domain Bridge Hardware Requirements
+
+Domain bridge nodes require:
+- Both a clearnet network interface (WAN)
+- And at least one mesh radio interface (WiFi mesh or LoRa)
+
+The GL.iNet GL-MT3000 with external LoRa USB module is the recommended minimum-cost domain bridge node. The BGP-X gateway hardware (MT7988A) is recommended for production deployments.
+
+**Domain Bridge Hardware Requirements by Transport**:
+
+| Target Domain Transport | Additional Hardware Required |
+|---|---|
+| WiFi 802.11s mesh | 802.11s-capable WiFi radio (most modern WiFi chips) |
+| LoRa mesh | LoRa transceiver module or USB adapter (SX1262/1276 recommended) |
+| Bluetooth BLE | BLE 5.0+ adapter |
+| Satellite | Compatible satellite modem with API access |
+
+**CPU/RAM for bridge nodes**: Domain bridge nodes run two concurrent path_id tables (single-domain and cross-domain). Each table entry is ~128 bytes. At 10,000 concurrent path_id entries per table: ~2.5 MB per table. Bridge nodes handling high cross-domain traffic should provision at least 1GB RAM; 2GB recommended for production.
+
+---
+
+## 6. Mesh Island Gateway Hardware Requirements
+
+**Use case**: Bridge between a mesh island and clearnet; publishes island to unified DHT.
+
+**Requirements beyond domain bridge**:
+- Both clearnet (ISP WAN) and mesh radio (WiFi 802.11s or LoRa) operational simultaneously
+- Sufficient LoRa antenna height and gain for island coverage
+
+**Minimum**: 1 BGP-X Node v1 or equivalent + WAN connection + elevated antenna mount.
+**Recommended**: 2+ independent gateways from different operators.
+
+---
+
+## 7. Satellite WAN Integration
 
 BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections** via USB satellite modems:
 
@@ -153,21 +298,24 @@ BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections
 
 ---
 
-## 5. Firmware Overview
+## 8. Firmware and Software
 
-| Firmware | Target Hardware | BGP-X Role |
+| Hardware | OS | BGP-X Component |
 |---|---|---|
-| bgpx-router-firmware | BGP-X Router v1 (ARM-class SoC) | AIO end-user; all capabilities |
-| bgpx-node-firmware | BGP-X Node v1 (low-power ARM) | Community relay, bridge, range extender |
-| bgpx-gateway-firmware | BGP-X Gateway v1 (high-throughput SoC) | Provider exit/bridge |
-| bgpx-openwrt | Any OpenWrt 23.05+ compatible device | Software relay/bridge |
-| bgpx-modem-firmware | ESP32-S3 / nRF52840 (Meshtastic-compatible) | LoRa radio modem (USB serial) |
-
-All firmware targets run the same bgpx-node daemon binary built for the appropriate target architecture. Firmware is the OpenWrt/Linux environment + drivers + daemon + LuCI UI. The daemon itself is cross-compiled from the same Rust source for all targets.
+| BGP-X Router v1 | OpenWrt 23.05+ (customized) | bgpx-node (full daemon) |
+| BGP-X Node v1 | OpenWrt 23.05+ (customized) | bgpx-node (full daemon) |
+| BGP-X Gateway v1 | OpenWrt 23.05+ or Debian 12 | bgpx-node + bgpx-gateway |
+| BGP-X Client Node | ESP-IDF / Arduino | bgpx-client-firmware (subset) |
+| BGP-X Adapter | ESP-IDF / Arduino | bgpx-modem-firmware (modem only) |
+| GL.iNet GL-MT6000 | OpenWrt 23.05+ | bgpx-node (OpenWrt package) |
+| Raspberry Pi 4/5 | Ubuntu 24.04 / Debian 12 | bgpx-node (Debian package) |
+| x86 server | Ubuntu 24.04 / Debian 12 | bgpx-node (Debian package) |
+| Android | Android 11+ | bgpx-sdk (embedded mode) |
+| iOS | iOS 16+ | bgpx-sdk (embedded mode) |
 
 ---
 
-## 6. Power Requirements Summary
+## 9. Power Requirements Summary
 
 | Device | Idle Power | Max Power | PoE | Solar |
 |---|---|---|---|---|
@@ -177,10 +325,12 @@ All firmware targets run the same bgpx-node daemon binary built for the appropri
 | BGP-X Node v1 (WiFi + LoRa) | 2W | 8W | No | Solar + LiPo or PoE |
 | BGP-X Node v1 (All radios) | 3W | 12W | PoE 802.3at or solar | PoE 802.3at or solar |
 | BGP-X Gateway v1 | 15W | 40W | AC 100-240V / PoE 802.3bt | AC/POE |
+| BGP-X Client Node | 0.1W | 1W | USB bus power | Solar + LiPo |
+| BGP-X Adapter | 0.05W | 0.5W | USB bus power | No |
 
 ---
 
-## 7. Enclosure and Environmental Ratings
+## 10. Enclosure and Environmental Ratings
 
 | Device | IP Rating | Temperature | Mounting |
 |---|---|---|---|
@@ -190,10 +340,12 @@ All firmware targets run the same bgpx-node daemon binary built for the appropri
 | BGP-X Node v1 | IP67 | -40°C to +85°C | Pole/Mast/Wall |
 | BGP-X Gateway v1 (1U Rack) | IP20 | 0°C to +50°C | 19" Rack |
 | BGP-X Gateway v1 (Outdoor) | IP65 | -20°C to +60°C | Pole/Wall |
+| BGP-X Client Node | IP20-IP65 (variant-dependent) | -20°C to +60°C | Handheld / Fixed |
+| BGP-X Adapter | IP20 | 0°C to +50°C | USB dongle |
 
 ---
 
-## 8. Open Hardware
+## 11. Open Hardware
 
 BGP-X Router v1 and BGP-X Node v1 reference designs are released under **CERN-OHL-S v2** (Strongly Reciprocal Open Hardware License). This means:
 
@@ -206,12 +358,28 @@ Reference design files (KiCad schematics, PCB layouts, BOM, Gerbers) will be pub
 
 ---
 
-## 9. Procurement
+## 12. Procurement
 
 BGP-X native hardware (Router v1, Node v1, Gateway v1) will be available from:
 - Community manufacturers building from open reference designs
 - The BGP-X hardware program (details published at testnet launch)
 
+BGP-X Client Node and Adapter hardware:
+- Reference designs for custom builds (CERN-OHL-S)
+- Pre-built devices available from LILYGO, Heltec, RAK Wireless, and other vendors
+
 Compatible third-party hardware is commercially available from GL.iNet, Raspberry Pi, and other vendors. See `compatible_hardware.md`.
 
 Meshtastic hardware for LoRa adaptation is available from LILYGO, Heltec, RAK Wireless, and other vendors. See `meshtastic_adapter.md`.
+
+---
+
+## 13. Note on Broadcast Amplifier (Deprecated Concept)
+
+The original BGP-X specification included a "BGP-X Amplifier v1" as a separate product category — a minimal LoRa repeater on STM32H7 with no BGP-X routing intelligence.
+
+**This concept has been retired.**
+
+The BGP-X Node v1 in Range Extension mode provides equivalent coverage extension while maintaining full BGP-X encryption at every hop. A pure PHY-level amplifier that relays traffic without encryption introduces a security vulnerability — traffic would be exposed at the relay's radio interface.
+
+The Node v1 Range Extension mode is the correct solution for range extension use cases. The STM32H7 is not suitable for running the full BGP-X daemon (requires Linux for async I/O, full crypto stack, DHT).
