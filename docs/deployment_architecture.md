@@ -1,5 +1,7 @@
 # BGP-X Deployment Architecture
 
+**Version**: 0.1.0-draft
+
 This document describes the complete deployment architecture of BGP-X — all six deployment modes, how BGP and BGP-X coexist, the three local interfaces, the application type model, and guidance for choosing the right deployment for your situation.
 
 ---
@@ -10,12 +12,38 @@ This document describes the complete deployment architecture of BGP-X — all si
 
 The BGP-X daemon (`bgpx-node`) runs on a network router and is the single BGP-X routing stack for an entire network. Every other BGP-X component — SDK applications, the configuration client, management GUIs — is a client of this daemon. They do not implement their own routing, handshakes, or cryptography.
 
+BGP-X is also an **inter-protocol domain router**. It routes traffic across routing domains — clearnet, BGP-X overlay, and mesh islands — in any combination, any order, with no protocol-enforced maximum on total hops or domain transitions.
+
 This architecture means:
 
 - Standard applications require zero modification to be protected
 - All devices on the LAN are automatically protected when they connect to the router
 - Application developers use the SDK to connect to the daemon — not to build their own overlay stack
 - The configuration client (bgpx-cli) is a management tool, not a routing stack
+
+---
+
+## Routing Domains — Foundational Concept
+
+BGP-X routes traffic across **routing domains**. A routing domain is a named network environment with its own transport characteristics.
+
+**Defined domains**:
+
+| Domain | Type ID | Description |
+|---|---|---|
+| Clearnet | 0x00000001 | BGP-routed internet — including satellite internet (Starlink, Iridium, Inmarsat, HughesNet, Viasat) |
+| BGP-X Overlay | 0x00000002 | Onion-encrypted relay network (virtual domain spanning all physical transports) |
+| Mesh Island | 0x00000003 | Named mesh island (WiFi 802.11s, LoRa, BLE, Ethernet P2P) |
+| LoRa Regional | 0x00000004 | LoRa-only regional channel plan |
+| bgpx-satellite | 0x00000005 | **RESERVED** for future BGP-X-native satellite network; NOT active in current deployments |
+
+**Satellite internet is clearnet**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide BGP-routed IP connectivity. From BGP-X's protocol perspective, a node with Starlink WAN is a clearnet node — domain type 0x00000001 — the same as fiber or cellular, with a higher latency class. Domain type 0x00000005 is reserved for a future BGP-X-native satellite network, not for current commercial satellite services.
+
+**Any-to-any routing**: A path can traverse any combination of domains in any order. A clearnet client can reach a mesh island service. A mesh island user can reach clearnet via a gateway. Two islands can connect via the overlay.
+
+**Domain bridge nodes**: Any BGP-X node with endpoints in 2+ routing domains is a domain bridge. It bridges traffic between those domains without re-encrypting inner onion layers.
+
+**N-hop unlimited**: There is no protocol maximum on total hops or domain transitions. Practical defaults exist (4 hops for single-domain clearnet, 6-8 for cross-domain), but these are configurable, not enforced.
 
 ---
 
@@ -26,6 +54,8 @@ This architecture means:
 ### Mode 1: Dual-Stack Router (BGP + BGP-X)
 
 **What it is**: Standard router with ISP WAN connection. BGP-X daemon runs alongside the standard network stack. The routing policy engine decides per-flow which path to use.
+
+**Hardware**: BGP-X Router v1.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -71,6 +101,8 @@ This architecture means:
 
 **What it is**: Same hardware, same daemon, different routing policy configuration. All LAN traffic is forced through BGP-X. No bypass option for LAN devices.
 
+**Hardware**: BGP-X Router v1.
+
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        BGP-X ONLY ROUTER                               │
@@ -112,6 +144,8 @@ This architecture means:
 
 The daemon code is identical for router and standalone deployment. The difference is configuration scope (one device vs whole network) and which interfaces are managed.
 
+**Geographic Plausibility**: The standalone node may optionally declare a jurisdiction. If declared, geo plausibility scoring applies. If NOT declared, geo plausibility scoring does NOT apply. Jurisdiction declaration is OPTIONAL.
+
 **When to use**:
 - No router access
 - Travel
@@ -122,21 +156,25 @@ The daemon code is identical for router and standalone deployment. The differenc
 
 ### Mode 4: BGP-X Mesh Node
 
-**What it is**: A BGP-X router with NO ISP WAN connection. Communicates with other BGP-X nodes via local mesh transport (WiFi 802.11s, LoRa radio, Bluetooth, wired Ethernet point-to-point).
+**What it is**: A BGP-X router with NO ISP WAN connection. Communicates with other BGP-X nodes via local mesh transport (WiFi 802.11s, LoRa radio, Bluetooth BLE, or wired Ethernet point-to-point).
+
+**Hardware**: BGP-X Node v1 or BGP-X Router v1.
+
+**Key clarification**: BGP-X Node v1 is a FULL BGP-X routing node. It runs the complete bgpx-node daemon — the same software as the Router v1. The difference is form factor and deployment context, not capability. It is NOT a "lite" or partial node.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                         MESH NODE                                      │
 │                                                                        │
-│  BGP-X daemon (same daemon code):                                     │
+│  BGP-X daemon (same daemon code as Router v1):                        │
 │    - No WAN configuration                                             │
-│    - Mesh transport interfaces (WiFi mesh, LoRa radio)                │
+│    - Mesh transport interfaces (WiFi mesh, LoRa radio, BLE)           │
 │    - Beacon broadcast for DHT bootstrap                               │
-│    - Full DHT participation (via mesh transport)                      │
-│    - Relay + entry + discovery roles                                  │
-│    - No exit role (no clearnet access without gateway)                │
+│    - Full DHT participation via unified DHT                           │
+│    - Relay role (entry + discovery + relay)                          │
+│    - No exit role (no clearnet access without gateway)               │
 │                                                                        │
-│  LAN: provides network access to connected devices                    │
+│  LAN: provides network access to connected devices (if configured)    │
 │  Mesh: WiFi 802.11s and/or LoRa radio connected to other mesh nodes  │
 │  No WAN: zero ISP dependency                                          │
 └────────────────────────────────────────────────────────────────────────┘
@@ -146,85 +184,106 @@ The daemon code is identical for router and standalone deployment. The differenc
 
 **Clearnet access**: Only available if a gateway node (Mode 5) is reachable through the mesh.
 
-**DHT operation in mesh-only mode**: Bootstrap via broadcast beacons instead of hardcoded internet IPs. Any mesh neighbor can be a bootstrap node. DHT operates entirely within the mesh.
+**DHT operation**: The mesh node participates in the **unified DHT**. There is no separate "mesh DHT." Mesh-only nodes access the unified DHT via their bridge/gateway nodes, which store and serve DHT records on their behalf.
 
 **When to use**:
 - Remote communities without ISP access
 - Disaster recovery when ISP is unavailable
 - Privacy-sensitive local communications
 - Community mesh networks
+- Range extension for existing mesh island
 
 ---
 
-### Mode 5: BGP-X Gateway Node
+### Mode 5: BGP-X Gateway Node — Domain Bridge
 
-**What it is**: A BGP-X router with BOTH mesh transport interfaces AND an ISP WAN connection. Bridges the mesh network to the clearnet internet.
+**What it is**: A BGP-X router with BOTH mesh transport interfaces AND an ISP WAN connection. Bridges the mesh network to the clearnet internet. Also called a "domain bridge node."
+
+**Hardware**: BGP-X Router v1 or BGP-X Node v1 (with WAN option). BGP-X Gateway v1 is provider-grade infrastructure for high-throughput operator deployments.
+
+**Key concept**: A gateway node is a DOMAIN BRIDGE — it bridges the mesh routing domain to the clearnet routing domain. This is the mechanism by which mesh island users reach the internet, and clearnet users reach mesh island services.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                         GATEWAY NODE                                   │
+│                        (Domain Bridge)                                 │
 │                                                                        │
 │  BGP-X daemon with:                                                   │
 │    - Mesh transport interfaces (receive from mesh community)          │
-│    - WAN interface (ISP connection for clearnet exit)                 │
-│    - Exit policy enforcement                                          │
+│    - WAN interface (ISP connection for clearnet)                      │
+│    - Domain bridge configuration (clearnet ↔ mesh)                   │
+│    - Exit policy enforcement (if providing clearnet exit)             │
 │    - DoH DNS resolver with DNSSEC + ECS stripping                    │
 │    - ECH support when destination publishes ECH config                │
-│    - DHT cross-domain sync (mesh DHT ↔ internet DHT)                 │
+│    - Publishes DOMAIN_ADVERTISE for bridge capability                 │
+│    - Publishes MESH_ISLAND_ADVERTISE for served islands              │
 │                                                                        │
-│  Announces to BOTH mesh DHT and internet DHT as exit node             │
-│  Serves as exit for mesh users' clearnet traffic                      │
-│  Exit node sees: destination (not source IP)                          │
+│  Participates in unified DHT                                          │
+│  Clearnet users can discover mesh island services via this bridge    │
+│  Mesh users can reach clearnet via this bridge's exit                │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Architecture**:
 ```
-Mesh Community → [mesh hops] → Gateway → [internet relay] → Exit → Destination
+Mesh Community → [mesh hops] → Gateway → [clearnet relays] → Exit → Destination
                                   │
                            ISP WAN connection
                            BGP-routed internet
 ```
 
-**From the destination's perspective**: traffic comes from the gateway's IP (not any individual mesh user's IP).
+**From the destination's perspective**: traffic comes from the gateway's exit node IP (not any individual mesh user's IP).
 
 **From BGP's perspective**: the gateway is a standard internet host. BGP cannot see inside BGP-X overlay packets.
 
-**DHT cross-domain synchronization**: gateways propagate records between the mesh DHT and the internet DHT, enabling unified global discovery. Internet nodes become discoverable to mesh nodes; mesh nodes become discoverable from the internet.
+**Clearnet users accessing mesh services**: A clearnet client with NO mesh radio can reach services inside a mesh island by constructing a cross-domain path that includes a DOMAIN_BRIDGE hop through this gateway. The gateway receives clearnet UDP packets and forwards them into the mesh via its radio.
+
+**DHT**: Single unified DHT. The gateway stores mesh-domain node advertisements in the unified DHT on behalf of mesh-only nodes that cannot directly reach internet DHT nodes.
+
+**Satellite WAN option**: A gateway in a remote location without fiber/cellular can use satellite internet (Starlink, Iridium) as its WAN. From BGP-X's perspective, this is clearnet with satellite-class latency. See `satellite_architecture.md`.
 
 **When to use**:
 - Community mesh needs internet access for some traffic
 - Multiple gateways in different jurisdictions for redundancy and diversity
 - Bridge between private mesh and public BGP-X network
+- Providing clearnet access for mesh island users
+- Enabling clearnet clients to reach mesh island services
+
+**Multiple gateways recommended**: A mesh island should have at least 2 gateway nodes operated by different operators in different locations. Single gateway = single point of failure.
 
 ---
 
-### Mode 6: BGP-X Broadcast Amplifier
+### Mode 6: BGP-X Range Extension — BGP-X Node v1
 
-**What it is**: A minimal device with a single radio that receives BGP-X mesh packets and rebroadcasts them. No routing intelligence, no DHT participation, no encryption or decryption.
+**DEPRECATED CONCEPT**: The earlier concept of a "BGP-X Amplifier v1" as a separate product category — a minimal LoRa repeater with no BGP-X routing intelligence — has been retired.
 
+**Replacement**: BGP-X Node v1 in Range Extension mode.
+
+A BGP-X Node v1 in Range Extension mode:
+- Is a FULL BGP-X routing node (runs complete bgpx-node daemon)
+- Prioritizes forwarding traffic over originating sessions
+- Provides LoRa coverage extension
+- Maintains full BGP-X onion encryption at every hop
+
+**Why the amplifier was retired**: A pure LoRa PHY-level repeater with no BGP-X routing would relay traffic in an unencrypted intermediate state at the relay's PHY interface. This breaks end-to-end encryption. The Node v1 in Range Extension mode provides equivalent coverage while preserving all BGP-X security properties.
+
+**Configuration for Range Extension mode**:
+```toml
+[node]
+role = "relay"
+
+[performance]
+relay_only_mode = true
+max_sessions = 500
+path_construction = false
+
+[[routing_domains]]
+domain_type = "mesh"
+island_id = "your-island"
+transports = ["lora"]
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                         AMPLIFIER                                      │
-│                                                                        │
-│  Hardware: STM32H7 MCU or ESP32-S3 + single radio                    │
-│  Firmware: minimal (not Linux)                                        │
-│                                                                        │
-│  Function:                                                            │
-│    Receive packet on radio interface                                  │
-│    Rebroadcast at full power                                          │
-│    That's it.                                                         │
-│                                                                        │
-│  No DHT, no session management, no routing decisions                  │
-│  Power: <800mW LoRa active, <2W WiFi active                          │
-│  Power input: PoE only (primary); solar + LiPo option                │
-└────────────────────────────────────────────────────────────────────────┘
-```
 
-**When to use**:
-- Extending LoRa mesh range over hills or obstacles (place on rooftop or hilltop)
-- Bridging short physical gaps between mesh segments
-- Dense indoor coverage without full nodes
+**Power**: Solar + LiFePO4 battery native. See `deployment/solar_deployment.md`.
 
 ---
 
@@ -283,6 +342,8 @@ BGP cannot see inside. BGP routes these packets the same as any other UDP traffi
 
 BGP-X uses the public internet as a packet delivery service. It knows the IP addresses of remote nodes (from DHT advertisements) and sends UDP packets to them. It has no visibility into BGP routing tables or AS-level decisions.
 
+**Satellite WAN**: If the WAN connection is via satellite internet (Starlink, Iridium), BGP-X treats it as clearnet with satellite-class latency. No protocol change. The satellite modem is detected via USB vendor ID, and latency_class is set to satellite-leo or satellite-geo.
+
 ---
 
 ## Three Local Interfaces
@@ -306,7 +367,7 @@ UDP to entry node → overlay → destination
 **Configuration**:
 ```
 Interface:  bgpx0
-MTU:        1200
+MTU:        1280
 Address:    100.64.0.1/10
 ```
 
@@ -357,6 +418,23 @@ A Unix domain socket for the configuration client (bgpx-cli and GUI management t
 **What it exposes**: Full daemon management — status, statistics, path management, pool management, routing policy, node database, reputation, configuration.
 
 **What it does NOT expose**: Stream data, application traffic, routing intelligence. It's management only.
+
+**Satellite-connected nodes**: May have longer control command latency (600ms+ for GEO). The control protocol is designed for high-latency tolerance.
+
+---
+
+## HTTP/2 for BGP-X Native Applications
+
+BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**.
+
+HTTP/2 is selected over HTTP/3 because:
+- BGP-X already provides reliable ordered delivery at the session layer
+- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
+- HTTP/3's QUIC would add redundant reliability and congestion control layers
+
+HTTP/3 is used at the exit node when connecting to HTTP/3 clearnet servers — this is standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
+
+For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on LoRa costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
 
 ---
 
@@ -412,6 +490,18 @@ The configuration client is a management tool. It is NOT a routing stack.
 
 ---
 
+## Geographic Plausibility — OPTIONAL
+
+Geographic plausibility scoring is an **OPTIONAL** reputation signal. Nodes MAY declare a jurisdiction in their advertisement. If they do, BGP-X measures RTT and evaluates whether the latency is plausible for the claimed region.
+
+- If jurisdiction is NOT declared: geo plausibility scoring does NOT apply
+- If jurisdiction IS declared: geo plausibility scoring applies
+- Satellite-connected nodes are **exempt** from geo plausibility scoring
+
+You are NOT required to declare your node's jurisdiction.
+
+---
+
 ## LAN Device Experience
 
 ### Standard Device (no SDK)
@@ -444,12 +534,12 @@ The app gets explicit control over path construction that standard applications 
 
 ## Network Diagrams by Scenario
 
-### Scenario A: Home Network (Dual-Stack)
+### Scenario A: Home Network (Dual-Stack) — BGP-X Router v1
 
 ```
 [Gaming console] ──── WiFi ────┐
 [Work laptop]    ──── WiFi ────┤
-[Phone]          ──── WiFi ────┤──► [BGP-X Dual-Stack Router]
+[Phone]          ──── WiFi ────┤──► [BGP-X Router v1]
 [Smart TV]       ──── Ethernet─┘         │
                                           ├── Gaming: standard route (low latency)
                                           ├── Work: BGP-X overlay (privacy)
@@ -459,28 +549,51 @@ The app gets explicit control over path construction that standard applications 
                                                    WAN (ISP)
 ```
 
-### Scenario B: Community Mesh (Mode 4 + 5)
+### Scenario B: Community Mesh (Mode 4 + 5) — Node v1 + Gateway
 
 ```
-[House A] ── LoRa ── [Mesh Node] ── WiFi mesh ── [Gateway] ── ISP ── Internet
-[House B] ── LoRa ── [Mesh Node]            ↑
-[House C] ── LoRa ──────────────────────────┘
-           (no ISP at houses)          (one gateway for community)
+[House A] ── LoRa ── [BGP-X Node v1] ── WiFi mesh ── [BGP-X Node v1 (Gateway)] ── ISP ── Internet
+[House B] ── LoRa ── [BGP-X Node v1]            ↑
+[House C] ── LoRa ──────────────────────────────┘
+           (no ISP at houses)              (one gateway for community)
+
+Unified DHT: Gateway stores records for mesh-only nodes
 ```
 
-### Scenario C: Multi-Island Bridging via Pools
+### Scenario C: Multi-Island via Domain Bridge
 
 ```
-[Island A Mesh] ── [Pool: mesh-a] ──► [Gateway A] ──► [Pool: default (internet)] ──► [Gateway B] ──► [Pool: mesh-b] ──► [Island B Mesh]
+[Island A Mesh] ── [Domain Bridge A] ──► [Clearnet relays] ──► [Domain Bridge B] ──► [Island B Mesh]
+
+Users on Island A communicate with users on Island B via cross-domain paths through clearnet relay pool.
+Both bridge nodes participate in unified DHT.
+All traffic is onion-encrypted end-to-end.
 ```
 
-Individual users on Island A communicate with users on Island B privately through BGP-X pools. The coverage gap is bridged via internet relay pools. All traffic is onion-encrypted end-to-end.
+### Scenario D: Remote Mesh Island with Satellite Gateway
+
+```
+[Remote Island Mesh] ── LoRa ── [BGP-X Node v1 (Gateway)] ── USB ── [Starlink Terminal] ── Satellite ── Internet
+
+Satellite WAN provides clearnet connectivity.
+Latency class: satellite-leo (20-40ms RTT).
+From BGP-X perspective: clearnet domain with satellite latency.
+```
 
 ---
 
 ## Choosing Your Deployment
 
-### Should I use Dual-Stack or BGP-X Only?
+### Which Hardware?
+
+| Need | Hardware |
+|---|---|
+| Replace my home router, protect all devices | BGP-X Router v1 |
+| Contribute mesh coverage to my community | BGP-X Node v1 |
+| High-throughput provider exit node | BGP-X Gateway v1 |
+| Use my existing OpenWrt router | BGP-X OpenWrt Package |
+
+### Dual-Stack vs BGP-X Only?
 
 **Use Dual-Stack if**:
 - Some devices need low latency (gaming, streaming) and can't tolerate 200ms overlay overhead
@@ -516,3 +629,12 @@ Individual users on Island A communicate with users on Island B privately throug
 - You only need to protect one device
 - You don't have access to the router
 - You're traveling and need protection on a laptop
+
+### Satellite WAN?
+
+**Use satellite WAN if**:
+- No fiber or cellular available at your location
+- Remote community mesh island
+- Mobile deployment (maritime, vehicle)
+
+**Satellite is clearnet**: All satellite internet services are clearnet domain in BGP-X. No special configuration needed beyond latency class declaration.
