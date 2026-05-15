@@ -1,6 +1,3 @@
-# `protocol/protocol_spec.md`
-
-```markdown
 # BGP-X Protocol Specification
 
 **Version**: 0.1.0-draft
