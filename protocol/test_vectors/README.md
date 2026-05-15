@@ -2,25 +2,27 @@
 
 **Version**: 0.1.0-draft
 
-This directory will contain machine-readable test vectors for all BGP-X protocol operations, published during the reference implementation phase.
+This directory will contain machine-readable test vectors for all BGP-X protocol operations. Test vectors will be published during the reference implementation phase.
 
 ---
 
 ## Compliance Requirement
 
-All BGP-X implementations MUST pass all published test vectors before being considered specification-compliant.
+All BGP-X implementations **MUST pass all published test vectors** before being considered specification-compliant.
 
 ---
 
-## Test Vector Categories
+## Required Test Vector Categories
+
+All implementations MUST pass all published test vectors before being considered specification-compliant.
 
 ### Cryptographic Primitives
 
-- X25519 key exchange: 10 vectors (RFC 7748)
-- Ed25519 sign + verify: 10 vectors (RFC 8032)
-- ChaCha20-Poly1305: 10 vectors (RFC 8439)
-- BLAKE3: 10 vectors (BLAKE3 specification)
-- HKDF-SHA256: 10 vectors (RFC 5869)
+- X25519 key exchange: 10 vectors (from RFC 7748)
+- Ed25519 sign + verify: 10 vectors (from RFC 8032)
+- ChaCha20-Poly1305: 10 vectors (from RFC 8439)
+- BLAKE3: 10 vectors (from BLAKE3 specification)
+- HKDF-SHA256: 10 vectors (from RFC 5869)
 - All primitives MUST produce identical results in clearnet, mesh, and satellite domain contexts (domain-agnostic verification)
 
 ### BGP-X Session Key Derivation
@@ -41,7 +43,7 @@ All BGP-X implementations MUST pass all published test vectors before being cons
 - path_id extraction: 10 vectors
 - Size class padding and unpadding: 5 vectors per size class (Small/Medium/Large/Maximum)
 
-### Cross-Domain Onion Layer Operations (NEW)
+### Cross-Domain Onion Layer Operations
 
 - DOMAIN_BRIDGE onion layer construction (clearnet→mesh): 5 vectors
   - Verify domain_id encoding at bytes 0-7 of next_hop
@@ -85,7 +87,7 @@ All BGP-X implementations MUST pass all published test vectors before being cons
 - Advertisement with mesh routing_domains entry: 3 vectors
 - Withdrawal message signing and verification: 3 vectors
 
-### Domain Bridge and Island Records (NEW)
+### Domain Bridge and Island Records
 
 - DOMAIN_ADVERTISE record construction and signature: 3 vectors
   - Verify symmetric DHT key computation (min/max domain_id ordering)
@@ -158,7 +160,7 @@ All BGP-X implementations MUST pass all published test vectors before being cons
 - Reassembly including out-of-order fragments: 5 vectors
 - Fragment timeout (incomplete reassembly): 2 vectors
 
-### Cross-Domain Return Path (NEW)
+### Cross-Domain Return Path
 
 - Return traffic routing at bridge node: 3 vectors
   - Verify cross-domain path_id lookup resolves correct (domain, source_addr)
@@ -230,6 +232,19 @@ test_vectors/
 ├── cross_domain_return_path.json
 └── negative_cases.json
 ```
+
+Each file contains an array of test case objects:
+
+```json
+{
+  "test_id": "onion_4hop_01",
+  "description": "4-hop onion construction with path_id",
+  "input": { ... },
+  "expected_output": { ... }
+}
+```
+
+### Extended Test Case Object Format
 
 Each test case object format:
 
