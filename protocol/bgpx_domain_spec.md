@@ -1,6 +1,8 @@
 # BGP-X Domain System (.bgpx)
 
 **Version**: 0.1.0-draft
+**Status**: Pre-implementation specification
+**Last Updated**: 2026-04-24
 
 ---
 
@@ -8,12 +10,14 @@
 
 The `.bgpx` domain system is BGP-X's equivalent of Tor's `.onion`. It provides:
 
-- **Service addressing**: any BGP-X native service is reachable at a `.bgpx` address
-- **Identity binding**: the `.bgpx` address IS the service's public key identity — no CA required
-- **Cross-domain access**: `.bgpx` addresses work from clearnet, mesh islands, and any routing domain
-- **Human-readable names**: short names via the BGP-X Name Registry (`name.bgpx`)
-- **Browser integration**: BGP-X Browser handles `bgpx://` URLs natively
-- **Latency transparency**: services declare their latency class; clients adapt
+- **Service addressing**: any BGP-X native service is reachable at a `.bgpx` address.
+- **Identity binding**: the `.bgpx` address IS the service's public key identity — no CA required.
+- **Cross-domain access**: `.bgpx` addresses work from clearnet, mesh islands, satellite links, and any other routing domain.
+- **Human-readable names**: short names via the BGP-X Name Registry (`name.bgpx`).
+- **Browser integration**: BGP-X Browser handles `bgpx://` URLs natively.
+- **Latency transparency**: services declare their latency class; clients adapt rendering and protocol behavior.
+
+This specification defines the address formats, service identity model, HTTP transport protocol, browser integration, and hardware support for the `.bgpx` ecosystem.
 
 ---
 
@@ -59,11 +63,13 @@ Short names are registered in the BGP-X Name Registry DHT. A short name maps to 
 <64-hex>.mesh.<island_id>.bgpx
 
 Example:
-a3f2b9c1....bgpx          (any domain — resolver finds it)
-a3f2b9c1....mesh.lima-district-1.bgpx   (explicit mesh island hint)
+a3f2b9c1....bgpx                      (any domain — resolver finds it)
+a3f2b9c1....mesh.lima-district-1.bgpx (explicit mesh island hint)
 ```
 
-The `mesh.<island_id>` suffix is an optional routing hint. It tells the BGP-X daemon to preferentially construct a cross-domain path through the specified mesh island rather than querying the unified DHT for the service globally. Without the suffix, the daemon queries the DHT and finds the service regardless of which domain it's in — the suffix is an optimization for clients that know which island a service is in.
+The `mesh.<island_id>` suffix is an optional routing hint. It tells the BGP-X daemon to preferentially construct a cross-domain path through the specified mesh island (domain type `0x00000003`) rather than querying the unified DHT for the service globally. Without the suffix, the daemon queries the DHT and finds the service regardless of which domain it's in — the suffix is an optimization for clients that know which island a service is in.
+
+**Domain ID Mapping**: The `<island_id>` string maps to the Domain ID instance hash (the last 4 bytes of the 8-byte Domain ID).
 
 ### 2.4 URL Scheme
 
@@ -101,7 +107,7 @@ The service keypair should be generated once and kept securely. It is the perman
 When BGP-X Browser connects to `a3f2b9c1....bgpx`:
 
 1. Browser extracts ServiceID from address: hex-decode `a3f2b9c1...` → 32 bytes
-2. Browser constructs BGP-X overlay path to the service
+2. Browser constructs BGP-X overlay path to the service (potentially cross-domain)
 3. BGP-X handshake: client performs X25519 key exchange with service's static public key
 4. The service's static public key IS the ServiceID
 5. Browser verifies: `BLAKE3(service.static_public_key) == address_service_id`
@@ -127,7 +133,17 @@ No certificate authority. No expiry date. No revocation lists. The address IS th
 
 `.bgpx` services use HTTP/2 framing carried over BGP-X streams. No TLS layer is used for `.bgpx` (BGP-X onion encryption provides transport security). TLS is optional and available for additional authentication scenarios.
 
-### 4.1 Request Multiplexing
+### 4.1 Why HTTP/2, Not HTTP/3?
+
+BGP-X selects HTTP/2 over HTTP/3 for `.bgpx` services because:
+
+- **BGP-X provides reliable ordered delivery** at the session layer.
+- **HTTP/2's multiplexing** provides stream parallelism over a single BGP-X path.
+- **HTTP/3's QUIC** would add a redundant reliability layer and congestion control on top of BGP-X's existing mechanisms.
+
+HTTP/3 is appropriate at the exit node when connecting to HTTP/3 clearnet servers — this is standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
+
+### 4.2 Request Multiplexing
 
 HTTP/2's stream multiplexing over a single BGP-X stream connection means:
 
@@ -142,7 +158,7 @@ BGP-X Stream (single overlay path connection)
 
 All HTTP/2 streams share one BGP-X overlay path. This is critical for performance: only one path construction cost per page load, regardless of how many resources the page requires.
 
-### 4.2 Resource Prioritization
+### 4.3 Resource Prioritization
 
 HTTP/2 stream priority maps to BGP-X stream priority:
 
@@ -156,7 +172,7 @@ HTTP/2 stream priority maps to BGP-X stream priority:
 | Non-blocking JS | Low (6-7) | 6 |
 | Analytics, tracking | Lowest (7) | 7 |
 
-### 4.3 Latency-Tolerant Headers
+### 4.4 Latency-Tolerant Headers
 
 Services declare their latency class in HTTP response headers:
 
@@ -172,7 +188,7 @@ X-BGP-X-Cache-TTL: 86400
 
 **`X-BGP-X-Cache-TTL`**: maximum seconds the browser should cache this resource. Services on LoRa paths should set high values to avoid refetching unchanged content on every visit.
 
-### 4.4 WebSocket over BGP-X
+### 4.5 WebSocket over BGP-X
 
 WebSocket connections over `.bgpx`:
 
@@ -183,7 +199,7 @@ wss://service.bgpx/channel    (same, with optional additional TLS layer)
 
 BGP-X streams provide reliable ordered delivery; WebSocket frames are carried natively without further adaptation. Real-time bidirectional communication works, with latency matching the path type (LoRa paths will have high round-trip delay for WebSocket messages — applications should use server-push patterns instead of polling for LoRa deployments).
 
-### 4.5 Server-Sent Events (SSE) over BGP-X
+### 4.6 Server-Sent Events (SSE) over BGP-X
 
 SSE is preferred over WebSocket polling for LoRa-tolerant applications:
 
@@ -270,7 +286,53 @@ For clearnet addresses resolved by the BGP-X daemon at the exit node, DNS uses D
 
 ---
 
-## 7. .bgpx vs. .onion Comparison
+## 7. Cross-Domain Access Architecture
+
+### 7.1 Unified DHT Resolution
+
+`.bgpx` addresses are stored in the **Unified DHT** that spans all routing domains. When a client resolves a `.bgpx` address:
+
+1. **Query**: Client sends `DHT_GET` to the Unified DHT.
+2. **Storage**: The query may be answered by:
+   - An internet DHT node (for services advertised with clearnet endpoints)
+   - A domain bridge node's cache (for services advertised with mesh endpoints)
+3. **Result**: The DHT returns the service's Node Advertisement, which includes `routing_domains` field indicating which domains the service is reachable from (clearnet, mesh island, etc.).
+4. **Path Construction**: The client constructs a path appropriate to its own domain and the service's domain:
+   - If client is clearnet and service is on a mesh island: path includes a `DOMAIN_BRIDGE` hop.
+   - If both are on the same mesh island: path is intra-island mesh relays.
+
+### 7.2 Domain Bridge Nodes
+
+Domain Bridge Nodes enable cross-domain `.bgpx` access. They advertise their bridge capability via `DOMAIN_ADVERTISE` messages (Message Type `0x1A`). When a clearnet client resolves a mesh island service, the DHT returns:
+- The service's ServiceID
+- The list of Domain Bridge Nodes that serve the island (extracted from `MESH_ISLAND_ADVERTISE` Message Type `0x1B`)
+
+The client then constructs a path through one of these bridges.
+
+### 7.3 Reserved Domain Type: bgpx-satellite (0x00000005)
+
+**Important Clarification**: Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) operate in the **clearnet domain (`0x00000001`)**. They are not a separate domain. A `.bgpx` service hosted behind a Starlink link is accessed via standard clearnet paths, albeit with higher latency.
+
+Domain type `0x00000005` (`bgpx-satellite`) is **RESERVED** for a future BGP-X-native satellite network where satellites themselves run BGP-X relay nodes with inter-satellite links. This is not currently active.
+
+---
+
+## 8. Hardware Ecosystem Support
+
+`.bgpx` services are designed to be accessed from, and hosted on, a wide range of hardware tiers defined in the BGP-X Hardware Specification.
+
+| Hardware Tier | Role in .bgpx Ecosystem |
+|---|---|
+| **Tier 1 (Router v1, Node v1, Gateway v1)** | **Primary Hosts**. Run full `bgpx-node` daemon; can host native `.bgpx` services; act as domain bridges; serve as DHT nodes for service discovery. |
+| **Tier 2 (Client Node)** | **Endpoints**. Run `bgpx-client-firmware`; connect to `.bgpx` services via mesh radio; do not host services; do not relay traffic for others. |
+| **Tier 3 (Adapter/Dongle)** | **Transport Modems**. Provide LoRa/WiFi mesh connectivity to a host computer; the host runs the `bgpx-node` daemon which accesses `.bgpx` services. |
+| **Software Package (OpenWrt/Debian)** | **Software Nodes**. Full daemon support on existing compatible hardware; functionally equivalent to Tier 1 for `.bgpx` access and hosting. |
+
+**Tier 2 devices** (Client Nodes) are optimized for low-power, low-cost access to the `.bgpx` ecosystem but lack the resources to run the full DHT storage or relay traffic. They rely on Tier 1 nodes (domain bridges) to access services across routing domains.
+
+---
+
+## 9. .bgpx vs. .onion Comparison
 
 | Feature | .onion v3 (Tor) | .bgpx (BGP-X) |
 |---|---|---|
@@ -289,7 +351,7 @@ For clearnet addresses resolved by the BGP-X daemon at the exit node, DNS uses D
 
 ---
 
-## 8. Error Pages
+## 10. Error Pages
 
 BGP-X Browser displays specific error pages for `.bgpx` failure conditions:
 
@@ -305,7 +367,7 @@ BGP-X Browser displays specific error pages for `.bgpx` failure conditions:
 
 ---
 
-## 9. .bgpx Service Requirements
+## 11. .bgpx Service Requirements
 
 Services hosted at `.bgpx` addresses SHOULD:
 
