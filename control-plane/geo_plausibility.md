@@ -2,6 +2,8 @@
 
 **Version**: 0.1.0-draft
 
+This document specifies the Geographic Plausibility Scoring system — RTT-based verification of node region claims used as an OPTIONAL reputation signal in path selection.
+
 ---
 
 ## 1. Overview
@@ -10,9 +12,33 @@ Geographic plausibility scoring uses RTT measurements to verify node region clai
 
 Domain-specific thresholds apply for different routing domains. A LoRa relay with 2-second RTT is not suspicious; a clearnet relay with 2-second RTT is highly suspicious.
 
+This is NOT a hard exclusion criterion. Geographic plausibility is a reputation signal. Nodes with persistent implausibility accumulate reputation penalties over time, eventually reducing their selection probability through the normal reputation mechanism.
+
 ---
 
-## 2. RTT Measurement Procedure
+## 2. Jurisdiction Declaration — OPTIONAL
+
+**Geographic plausibility scoring is OPTIONAL.** A node may declare a jurisdiction (country) in its advertisement. If declared, geo plausibility scoring applies. If NOT declared, geo plausibility scoring does NOT apply.
+
+### 2.1 Jurisdiction Declaration is Opt-In
+
+Nodes are NOT required to declare a jurisdiction in their advertisement. Declaring jurisdiction is a privacy/convenience tradeoff:
+
+- **Pro**: Users can select paths that avoid or prefer specific jurisdictions
+- **Con**: Declaring jurisdiction reveals information about the node's location
+
+### 2.2 When Scoring Applies
+
+| Condition | Geo Plausibility Scoring |
+|---|---|
+| Jurisdiction declared | Applies (measured RTT vs. expected RTT for claimed region) |
+| Jurisdiction NOT declared | Does NOT apply (returns neutral score 0.5) |
+| Satellite-class node | Exempt (returns neutral score 0.5 regardless of declaration) |
+| Pure mesh island node (no clearnet bridge) | Exempt (returns neutral score 0.5) |
+
+---
+
+## 3. RTT Measurement Procedure
 
 RTT measurements are collected from KEEPALIVE exchanges:
 
@@ -23,7 +49,9 @@ RTT measurements are collected from KEEPALIVE exchanges:
 4. Apply to rolling average: RTT[node_id] = exponential_moving_average(RTT_sample, alpha=0.1)
 ```
 
-Minimum samples before scoring: **5 RTT measurements**. Before 5 measurements: return neutral score (0.5).
+Minimum samples before scoring: **5 RTT measurements**.
+
+Before 5 measurements: return neutral score (0.5).
 
 RTT measurements MUST be constant-time (not timing-channel-leaking).
 
@@ -31,7 +59,7 @@ Outlier rejection: discard samples >5× current average (likely network anomaly)
 
 ---
 
-## 3. Score Computation
+## 4. Score Computation
 
 ```python
 def compute_geo_plausibility_score(node, client_region, domain):
@@ -63,7 +91,7 @@ def compute_geo_plausibility_score(node, client_region, domain):
 
 ---
 
-## 4. Per-Region RTT Threshold Table
+## 5. Per-Region RTT Threshold Table
 
 Expected one-way RTT ranges (milliseconds). Clients measure round-trip; compare against 2× one-way:
 
@@ -82,13 +110,13 @@ Example: NA client → node claiming EU: Expected RTT 100-240ms. Score threshold
 
 ---
 
-## 5. Domain-Specific Plausibility
+## 6. Domain-Specific Plausibility
 
-### Clearnet Nodes
+### 6.1 Clearnet Nodes
 
 Use standard internet RTT thresholds from table above. Unchanged.
 
-### WiFi Mesh Island Nodes
+### 6.2 WiFi Mesh Island Nodes
 
 ```python
 def compute_mesh_wifi_plausibility(node):
@@ -99,7 +127,7 @@ def compute_mesh_wifi_plausibility(node):
     else:                       return 0.2
 ```
 
-### LoRa Mesh Island Nodes
+### 6.3 LoRa Mesh Island Nodes
 
 ```python
 def compute_mesh_lora_plausibility(node):
@@ -109,7 +137,7 @@ def compute_mesh_lora_plausibility(node):
     else:                         return 0.1  # Suspiciously slow even for LoRa
 ```
 
-### Domain Bridge Nodes
+### 6.4 Domain Bridge Nodes
 
 Domain bridge nodes are checked independently for each domain they serve:
 
@@ -131,13 +159,13 @@ def compute_bridge_latency_plausibility(latency_ms, from_domain, to_domain):
     return compute_geo_plausibility_score_from_rtt(latency_ms, from_domain, to_domain)
 ```
 
-### Satellite Nodes
+### 6.5 Satellite Nodes
 
 Exempt from geographic plausibility scoring. Return neutral score 0.5.
 
 ---
 
-## 6. Reputation Events Generated
+## 7. Reputation Events Generated
 
 | Condition | Event | Score Change |
 |---|---|---|
@@ -151,46 +179,78 @@ For mesh and bridge nodes: domain-tagged events (e.g., GEO_SUSPICIOUS with domai
 
 ---
 
-## 7. Attack Resistance
+## 8. Exemptions
 
-**Adversary adds RTT delay**: makes node appear LESS trustworthy (higher RTT than expected). Score decreases; node selected less. Self-defeating attack.
+The following node types are exempt from internet-calibrated geo plausibility scoring:
 
-**Adversary reduces RTT delay**: impossible below speed-of-light limits. A node in Asia claiming EU region cannot respond in <100ms from EU — physically prevented.
-
-**Fake RTT records**: reputation database is local-first. Adversary cannot inject fake RTT measurements without compromising the client device.
-
----
-
-## 8. Score Integration with Path Selection
-
-```
-path_score_component = w_geo × S_geo_plausibility(node, domain) = 0.10 × score
-```
-
-At default weights: a fully plausible node contributes 0.10; an implausible node contributes 0.00. This is meaningful but not dominating. A node with excellent uptime and reputation but slightly suspicious RTT is still selected — just with lower probability.
+1. **Mesh-only nodes**: use mesh transport thresholds instead
+2. **Satellite link nodes**: tagged with link_quality_profile latency_class=3 (very high); geo check skipped; return neutral score 0.5
+3. **Nodes with <5 RTT measurements**: neutral score 0.5
+4. **Nodes without declared jurisdiction**: geo plausibility scoring does not apply
 
 ---
 
-## 9. Implementation Notes
+## 9. Attack Resistance
 
-- RTT measurements MUST be constant-time
-- Exponential moving average with α = 0.1 (slow-moving; resistant to single outlier)
-- Outlier rejection: >5× current average discarded
-- Storage: per-NodeID in memory; persisted to reputation database
-- Thread safety: atomic updates or per-node locks
+### 9.1 Adversary Adds RTT Delay
+
+An adversary controlling a node in region X might add artificial delay to appear to be in a more distant region Y. This only makes the node appear LESS trustworthy (higher RTT than expected).
+
+**Result**: geo plausibility score decreases; node is less likely to be selected. Self-defeating attack.
+
+### 9.2 Adversary Reduces RTT Delay
+
+Impossible below speed-of-light limits. A node claiming to be in the EU that actually resides in Asia cannot reduce the RTT to EU-client expectations without being physically in the EU.
+
+**Result**: This is exactly what geo plausibility scoring catches. The attack is physically prevented.
+
+### 9.3 Adversary Adds Fake RTT Records to Reputation Database
+
+The reputation database is local-first. An adversary cannot inject fake RTT measurements into a client's database without compromising the client device.
+
+Global distributed reputation records for geo plausibility events are subject to the standard advisory-only policy — not automatically trusted.
+
+---
+
+## 10. Score Integration with Path Selection
+
+The geo plausibility score (0.0-1.0) is the 5th component of the node scoring function:
+
+```
+path_score_component = w_geo × S_geo_plausibility(node, domain)
+                     = 0.10 × geo_plausibility_score
+```
+
+At default weights:
+- A node with score 1.0 (fully plausible): contributes 0.10 to total score
+- A node with score 0.0 (implausible): contributes 0.00 to total score
+- A node with score 0.5 (neutral): contributes 0.05 to total score
+
+This is meaningful but not dominating. A node with excellent uptime and reputation but slightly suspicious RTT is still selected — just with lower probability.
+
+---
+
+## 11. Implementation Notes
+
+- RTT measurements MUST be constant-time (not timing-channel-leaking)
+- RTT rolling average: exponential moving average with α = 0.1 (slow-moving)
+- RTT outlier rejection: discard samples >5× current average (likely network anomaly)
+- Measurement storage: per-NodeID in memory; persisted to reputation database
+- Thread safety: RTT table accessed concurrently; use atomic updates or per-node locks
 - Minimum 5 measurements before scoring (return 0.5 neutral for new nodes)
 
 ---
 
-## 10. Test Vectors
+## 12. Test Vectors
 
-1. NA client → EU node, RTT 140ms: ratio = 140/240 = 0.58 → score = 1.0
-2. NA client → EU node, RTT 400ms: ratio = 400/240 = 1.67 → score = 0.7
-3. NA client → EU node, RTT 600ms: ratio = 600/240 = 2.5 → score = 0.4
-4. NA client → EU node, RTT 900ms: ratio = 900/240 = 3.75 → score = 0.0
-5. LoRa mesh node, RTT 1500ms: compute_mesh_lora_plausibility → 1.0
-6. Satellite node: exempt → 0.5
-7. < 5 measurements: neutral → 0.5
-8. Same-region node, RTT 5ms: ratio = 5/100 = 0.05 → score = 1.0
-9. WiFi mesh node, RTT 8ms: compute_mesh_wifi_plausibility → 1.0
-10. WiFi mesh node, RTT 75ms: compute_mesh_wifi_plausibility → 0.4
+1. **NA client → EU node, RTT 140ms**: score = 1.0 (within 100-240ms expected round-trip)
+2. **NA client → EU node, RTT 400ms**: score = 0.7 (400/240 = 1.67×, between 1.5× and 2×)
+3. **NA client → EU node, RTT 600ms**: score = 0.4 (600/240 = 2.5×, between 2× and 3×)
+4. **NA client → EU node, RTT 900ms**: score = 0.0 (900/240 = 3.75×, above 3×)
+5. **LoRa mesh node, RTT 1500ms**: compute_mesh_lora_plausibility → 1.0
+6. **Satellite node**: geo check skipped; returns 0.5 (neutral)
+7. **<5 measurements**: returns 0.5 (neutral)
+8. **Same-region node, RTT 5ms**: score = 1.0 (within 10-100ms expected round-trip)
+9. **WiFi mesh node, RTT 8ms**: compute_mesh_wifi_plausibility → 1.0
+10. **WiFi mesh node, RTT 75ms**: compute_mesh_wifi_plausibility → 0.4
+11. **Node without declared jurisdiction**: returns 0.5 (neutral) — geo scoring does not apply
