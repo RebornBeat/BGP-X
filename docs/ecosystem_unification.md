@@ -400,20 +400,7 @@ For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on
 
 ---
 
-## 15. Geographic Plausibility — OPTIONAL
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal in BGP-X:
-
-- If a node declares a jurisdiction in its advertisement: geo plausibility scoring applies
-- If a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-- Nodes are NOT required to declare jurisdiction
-- Declaring jurisdiction is an opt-in privacy/convenience tradeoff
-
-Satellite-connected nodes are **exempt** from geo plausibility scoring because satellite terminal IPs may be assigned from distant ground stations.
-
----
-
-## 16. Honest Competitive Positioning
+## 15. Honest Competitive Positioning
 
 BGP-X should not overclaim. The honest positioning:
 
@@ -438,7 +425,7 @@ BGP-X's value is in synthesis and unification, not in any single primitive.
 
 ---
 
-## 17. Key Architectural Summary
+## 16. Key Architectural Summary
 
 BGP-X unifies the fragmented privacy and mesh networking ecosystem by implementing a **routing domain model** where clearnet, BGP-X overlay, and mesh islands are equal first-class citizens.
 
