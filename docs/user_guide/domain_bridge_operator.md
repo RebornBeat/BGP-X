@@ -269,8 +269,6 @@ To declare a jurisdiction:
 jurisdiction = "US-CA"  # Optional: ISO 3166-2 country/region code
 ```
 
-**Satellite-connected nodes are exempt** from geo plausibility scoring because satellite terminal IPs may be assigned from distant ground stations. If your bridge uses Starlink WAN and declares a jurisdiction, geo plausibility scoring is automatically bypassed for the clearnet side.
-
 ---
 
 ## 9. Satellite WAN as Clearnet
