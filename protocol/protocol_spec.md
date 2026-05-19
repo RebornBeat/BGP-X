@@ -988,41 +988,7 @@ For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on
 
 ---
 
-## 26. Geographic Plausibility — OPTIONAL Feature
-
-Geographic plausibility scoring is an OPTIONAL reputation signal. It is NOT required for BGP-X operation.
-
-### When Geo Plausibility Applies
-
-- IF a node declares a jurisdiction in its advertisement: geo plausibility scoring applies
-- IF a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-
-Nodes are NOT required to declare a jurisdiction in their advertisement. Declaring jurisdiction is an opt-in privacy/convenience tradeoff:
-
-- **Pro**: Users can select paths that avoid or prefer specific jurisdictions
-- **Con**: Declaring jurisdiction reveals information about the node's location
-
-### Exemptions
-
-The following node types are EXEMPT from geo plausibility scoring (always return neutral score 0.5):
-
-- Satellite-class clearnet nodes (`latency_class = satellite-*`)
-- Mesh nodes without declared jurisdiction
-- Nodes in domains without internet RTT calibration (pure mesh islands without clearnet bridge)
-
-### Behavior in Path Construction
-
-A node with poor geo plausibility score:
-
-- Receives lower selection probability (scoring penalty)
-- Can still be selected in a path (not hard excluded)
-- Persistent implausibility may lead to reputation penalties through normal reputation system mechanisms
-
-Geo plausibility is a reputation signal, not a mandatory filtering criterion.
-
----
-
-## 27. Compliance Requirements
+## 26. Compliance Requirements
 
 ### MUST
 
@@ -1091,7 +1057,7 @@ Geo plausibility is a reputation signal, not a mandatory filtering criterion.
 
 ---
 
-## 28. Test Vectors
+## 27. Test Vectors
 
 Test vectors for BGP-X protocol verification are documented in `/protocol/test_vectors/README.md`.
 
@@ -1127,33 +1093,3 @@ Required test vector categories:
 | Mesh island | Mesh island (different) | Domain bridge node OR internet relay pool |
 
 Cross-domain paths use the same onion encryption throughout. Domain bridge nodes decrypt only the DOMAIN_BRIDGE layer and forward remaining encrypted payload to the next domain. No re-encryption occurs at domain boundaries.
-
----
-
-## Appendix B: Satellite Internet Clarification
-
-**Commercial satellite internet services are clearnet domain (0x00000001).**
-
-This includes:
-
-- Starlink (LEO, 20-40ms RTT)
-- Iridium Certus (LEO, 150-300ms RTT)
-- Inmarsat (GEO, 600ms+ RTT)
-- HughesNet (GEO, 600ms+ RTT)
-- Viasat (GEO, 600ms+ RTT)
-- OneWeb (LEO, 30-50ms RTT)
-- Kuiper (LEO, 20-40ms RTT)
-
-From BGP-X's perspective, a satellite-connected node is a clearnet node with high latency_class annotation. The physical medium (fiber vs. satellite radio) is invisible to the BGP-X protocol layer.
-
-**Domain type 0x00000005 (bgpx-satellite)** is RESERVED for future BGP-X-native satellite infrastructure where:
-
-- Satellites themselves run BGP-X relay software
-- Inter-satellite links carry BGP-X packets directly
-- No ground station is required for BGP-X traffic
-
-This is NOT currently active. No commercial satellite service provides this capability. Any node advertising domain type 0x00000005 in current deployments MUST be rejected as unverifiable.
-
----
-
-**End of Protocol Specification**
