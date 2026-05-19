@@ -64,8 +64,6 @@ BGP-X provides three equal first-class entry points to the network:
 
 No entry point is primary. A mesh-only user in a remote village and a fiber-connected user in a city participate in the same network. A clearnet client with no mesh hardware can reach services hosted in mesh islands via domain bridge nodes.
 
-**Satellite internet (Starlink, Iridium, Inmarsat, etc.) is clearnet.** Commercial satellite services provide BGP-routed IP connectivity. From BGP-X's perspective, satellite internet is clearnet domain type 0x00000001 — the same as fiber or cellular, just with higher latency. Domain type 0x00000005 is reserved for a future BGP-X-native satellite network, not for current commercial satellite services.
-
 ---
 
 ## Routing Domains
@@ -128,8 +126,6 @@ For LoRa paths: HTTP/2 multiplexing is critical. Each round-trip costs 1-5 secon
 | Mesh Relay | No ISP; mesh transport only | BGP-X Node v1 or Router v1 | No |
 | Community Gateway | Bridges mesh island to clearnet | BGP-X Node v1 or Router v1 | Yes (at gateway) |
 | Range Extension | Coverage extension with full BGP-X encryption | BGP-X Node v1 in Range Extension mode | No |
-
-**Note on Range Extension**: The earlier concept of a "Broadcast Amplifier" has been retired. BGP-X Node v1 in Range Extension mode provides equivalent coverage benefits while maintaining full BGP-X onion encryption at every hop. This is NOT a "dumb repeater" — it runs the complete bgpx-node daemon, prioritizing forwarding over session origination.
 
 ---
 
