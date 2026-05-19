@@ -280,19 +280,7 @@ For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on
 
 ---
 
-## 18. Geographic Plausibility — OPTIONAL
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal.
-
-- If a node **declares** a jurisdiction in its advertisement: geo plausibility scoring applies.
-- If a node **does NOT declare** jurisdiction: geo plausibility scoring does NOT apply.
-- Jurisdiction declaration is opt-in.
-
-Satellite-connected nodes (latency_class = satellite-*) are **exempt** from geo plausibility scoring.
-
----
-
-## 19. What BGP-X Does Not Do
+## 18. What BGP-X Does Not Do
 
 Be clear about this before deploying:
 
@@ -305,7 +293,7 @@ Be clear about this before deploying:
 
 ---
 
-## 20. Security Recommendations
+## 19. Security Recommendations
 
 When using BGP-X, follow these practices:
 
