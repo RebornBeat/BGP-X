@@ -142,8 +142,6 @@ BGP-X routes traffic across **routing domains**. A routing domain is a named net
 
 The daemon code is identical for router and standalone deployment. The difference is configuration scope (one device vs whole network) and which interfaces are managed.
 
-**Geographic Plausibility**: The standalone node may optionally declare a jurisdiction. If declared, geo plausibility scoring applies. If NOT declared, geo plausibility scoring does NOT apply. Jurisdiction declaration is OPTIONAL.
-
 **When to use**:
 - No router access
 - Travel
@@ -485,18 +483,6 @@ The configuration client is a management tool. It is NOT a routing stack.
 **What it does NOT do**: Route traffic, construct paths, perform handshakes, encrypt anything.
 
 **Not required for BGP-X to function**: The daemon operates without the config client.
-
----
-
-## Geographic Plausibility — OPTIONAL
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal. Nodes MAY declare a jurisdiction in their advertisement. If they do, BGP-X measures RTT and evaluates whether the latency is plausible for the claimed region.
-
-- If jurisdiction is NOT declared: geo plausibility scoring does NOT apply
-- If jurisdiction IS declared: geo plausibility scoring applies
-- Satellite-connected nodes are **exempt** from geo plausibility scoring
-
-You are NOT required to declare your node's jurisdiction.
 
 ---
 
