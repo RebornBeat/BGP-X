@@ -101,9 +101,6 @@ Select how your ISP provides internet connectivity:
 
 Click **Test Connection**. If successful, you will see your public IP address.
 
-**Important Note on Satellite WAN**:
-If using satellite internet (Starlink, Iridium, Inmarsat, HughesNet, Viasat), be aware that BGP-X treats this as **clearnet domain** (domain type `0x00000001`), the same as fiber or cellular. The only difference is the higher latency. All BGP-X privacy protections apply equally. Domain type `0x00000005` (bgpx-satellite) is reserved for future BGP-X-native satellite networks and is not currently used.
-
 ### 4.3 Step 2: Admin Password
 
 Set a strong password for the router admin interface (`http://192.168.1.1`). This protects your router's configuration from unauthorized changes.
