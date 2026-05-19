@@ -455,20 +455,7 @@ BGP-X's innovation is **unification**: combining all of these into one coherent 
 
 ---
 
-## 14. Geographic Plausibility — OPTIONAL
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal:
-
-- If a node declares a jurisdiction: geo plausibility scoring applies
-- If a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-- Nodes are NOT required to declare jurisdiction
-- Declaring jurisdiction is an opt-in privacy/convenience tradeoff
-
-Satellite-connected nodes are **exempt** from geo plausibility scoring because satellite terminal IPs may be assigned from distant ground stations.
-
----
-
-## 15. HTTP/2 for .bgpx Services
+## 14. HTTP/2 for .bgpx Services
 
 BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**.
 
