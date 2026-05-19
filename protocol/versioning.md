@@ -296,17 +296,7 @@ The geographic plausibility algorithm is versioned independently within the repu
 
 ---
 
-## 13. Satellite Internet Clarification
-
-Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide BGP-routed IP connectivity. From BGP-X's perspective, they are **clearnet domain (0x00000001)**, not a separate domain.
-
-Domain type 0x00000005 (bgpx-satellite) is **RESERVED** for future BGP-X-native satellite infrastructure where satellites would run BGP-X relay software with inter-satellite links. This is NOT currently active. Any node advertising domain type 0x00000005 in current deployments MUST be rejected as unverifiable.
-
-Satellite-connected nodes participate in the **unified DHT** (not a separate satellite DHT).
-
----
-
-## 14. Unified DHT Versioning
+## 13. Unified DHT Versioning
 
 BGP-X operates **one unified DHT** spanning all routing domains:
 
