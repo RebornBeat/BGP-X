@@ -151,16 +151,6 @@ Starlink requires a user agreement and service registration with SpaceX. Availab
 
 Licensed service; operator provides regulatory compliance within coverage area.
 
-### 6.3 Satellite as Clearnet in BGP-X Architecture
-
-**Important clarification**: Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide **clearnet** connectivity over BGP-routed infrastructure. From BGP-X's perspective:
-
-- **Domain**: Clearnet (type 0x00000001) — same as fiber, cellular, or cable
-- **Latency class**: Satellite-specific (LEO: 20-60ms, GEO: 600ms+)
-- **Regulatory treatment**: Same as any other internet WAN from a BGP-X protocol perspective. The physical medium (satellite radio vs. fiber) is invisible to BGP-X routing.
-
-**Domain type 0x00000005 (bgpx-satellite)** is RESERVED for a future BGP-X-native satellite network where satellites themselves run BGP-X relay software and communicate via inter-satellite links. This is NOT currently active. Any node advertising domain type 0x00000005 in current deployments MUST be rejected as unverifiable.
-
 ---
 
 ## 7. Cryptographic Software Export
