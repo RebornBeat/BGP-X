@@ -65,8 +65,6 @@ CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
                          All reach all. None is secondary.
 ```
 
-**Satellite internet (Starlink, Iridium, Inmarsat, etc.) is clearnet.** Commercial satellite internet services provide BGP-routed IP connectivity. From BGP-X's protocol perspective, a node with Starlink WAN is a clearnet node — domain type 0x00000001 — the same as fiber or cellular, with a higher latency class.
-
 A Meshtastic community in Lima, a privacy-conscious clearnet user in Berlin, and a satellite-connected research station in Antarctica can all participate in the same network, route to each other's services, and maintain end-to-end privacy throughout.
 
 ---
@@ -168,12 +166,6 @@ Satellite internet as clearnet WAN enables BGP-X deployment in locations where f
 - Disaster response scenarios deploying BGP-X coverage rapidly via satellite terminal
 
 In all cases: the satellite is the clearnet-domain WAN. The BGP-X overlay runs on top. The mesh domain (LoRa, WiFi) operates via radio. Domain bridge nodes bridge the two. The result: a fully privacy-capable BGP-X mesh island with satellite internet access, deployed anywhere on Earth.
-
-### Future: BGP-X Satellite Network
-
-Domain type 0x00000005 is reserved for a future network of BGP-X relay nodes physically in orbit — satellites running the BGP-X daemon, communicating via inter-satellite links, forming a BGP-X satellite mesh domain that is distinct from (and provides routing through) terrestrial clearnet infrastructure.
-
-Current commercial satellite services are not this and cannot be made into this via software. Domain type 0x00000005 will activate only when BGP-X-native satellite infrastructure is deployed.
 
 ---
 
