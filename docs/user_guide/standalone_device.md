@@ -1033,8 +1033,6 @@ latency_class = "satellite-geo"  # 600ms+ RTT
 keepalive_interval_secs = 180   # Longer keepalive for high latency
 ```
 
-**Note**: Satellite internet services (Starlink, Iridium, Inmarsat) are clearnet domain in BGP-X — not a separate satellite routing domain. They provide BGP-routed IP connectivity, just with higher latency.
-
 ---
 
 ## 16. Cross-Domain Paths
