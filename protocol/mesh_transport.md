@@ -199,20 +199,6 @@ Fragmentation:     Not required
 
 **BGP-X binding**: BGP-X daemon creates a raw Ethernet socket. Each BGP-X node on the link is identified by MAC address + NodeID mapping from MESH_BEACON.
 
-### 4.5 Satellite Internet Clarification
-
-Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide **internet connectivity over BGP**. From BGP-X's perspective, they are **clearnet transports** — the same clearnet domain as fiber or cellular, just with higher latency. They are not a separate mesh routing domain.
-
-A satellite-connected clearnet node:
-- Operates as a clearnet node (domain type 0x00000001)
-- Has `latency_class = satellite-leo` (Starlink, OneWeb, Kuiper) or `satellite-geo` (Inmarsat, HughesNet, Viasat)
-- Uses the same BGP-X protocol as any other clearnet node
-- Is exempt from geographic plausibility RTT scoring
-
-**Domain type 0x00000005 (bgpx-satellite)** is RESERVED for a future BGP-X-native satellite network where satellites themselves run BGP-X relay nodes with inter-satellite links carrying BGP-X protocol directly. This is NOT currently active. Any node advertising domain type 0x00000005 MUST be rejected as unverifiable.
-
-See `docs/satellite_architecture.md` for full satellite architecture and future vision.
-
 ---
 
 ## 5. Mesh Island as Routing Domain
