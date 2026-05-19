@@ -259,14 +259,7 @@ bgpx-cli islands publish your-island-id
 
 ---
 
-## 8. Geographic Plausibility (Optional)
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal. Nodes are NOT required to declare a jurisdiction.
-
-If you choose to declare a jurisdiction in your node advertisement:
-- Geo plausibility scoring will apply
-- RTT measurements will be compared to expected ranges for your declared region
-- Implausible scores generate reputation penalties (not hard blocks)
+## 8. Geographic Declaration
 
 To declare a jurisdiction:
 
