@@ -480,16 +480,3 @@ HTTP/2 is selected over HTTP/3 because:
 HTTP/3 is used at exit nodes when connecting to HTTP/3 clearnet servers — standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
 
 For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
-
----
-
-## 16. Satellite Internet Clarification
-
-**Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) are clearnet.**
-
-They provide BGP-routed IP connectivity. From BGP-X's perspective:
-- **Domain**: Clearnet (type 0x00000001) — same as fiber, cellular, or cable
-- **Latency class**: Satellite-specific (LEO: 20-60ms, GEO: 600ms+)
-- **Regulatory treatment**: Same as any other internet WAN from a BGP-X protocol perspective
-
-**Domain type 0x00000005 (bgpx-satellite)** is **RESERVED** for a future BGP-X-native satellite network where satellites themselves run BGP-X relay software and communicate via inter-satellite links. This is NOT current commercial satellite internet. Domain type 0x00000005 is reserved and not active in current deployments.
