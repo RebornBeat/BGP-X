@@ -95,8 +95,6 @@ BGP-X treats the public internet as a best-effort packet delivery service. BGP-X
 
 BGP-X uses ASN information only from node advertisements (self-reported by node operators) for path diversity enforcement. This is NOT a BGP lookup — it's the node's self-declared ASN, indirectly verified via geographic plausibility scoring.
 
-**Geographic Plausibility — OPTIONAL**: Geographic plausibility scoring is an OPTIONAL reputation signal. Nodes may declare a jurisdiction in their advertisement. If jurisdiction is declared, geo plausibility scoring applies, measuring RTT to verify the claimed region. If jurisdiction is NOT declared, geo plausibility scoring does NOT apply. Nodes are NOT required to declare jurisdiction. Satellite-connected nodes (latency_class = satellite-*) are exempt from geo plausibility scoring because satellite terminal IPs may be assigned from distant ground stations.
-
 ---
 
 ## 7. BGP and Cross-Domain Routing
