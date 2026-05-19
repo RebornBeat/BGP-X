@@ -88,7 +88,7 @@ BGP-X provides hardware for every role in the island ecosystem.
 **Clearnet Uplink**: A gateway requires an ISP connection. This can be:
 - Fiber, cable, or DSL
 - Cellular (4G/5G)
-- **Satellite internet** (Starlink, Iridium, Inmarsat). **Note**: BGP-X treats commercial satellite internet as clearnet domain (0x00000001), same as fiber, just with higher latency. This is ideal for remote islands.
+- Satellite internet (Starlink, Iridium, Inmarsat).
 
 ### 3.2 Relay Nodes
 
