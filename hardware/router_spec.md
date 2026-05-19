@@ -80,8 +80,6 @@ Any SoC or compute module used in a BGP-X Router v1 implementation MUST meet the
 - **Inmarsat Terminals**: Vendor-specific interface
 - **Any USB Ethernet adapter**: Treated as clearnet WAN; satellite latency class configured manually or via geo-detection.
 
-**Satellite Domain Clarification**: Commercial satellite internet services (Starlink, Iridium, Inmarsat, etc.) are **clearnet domain (0x00000001)** in BGP-X. They provide BGP-routed IP connectivity. From the protocol's perspective, a satellite WAN is a clearnet interface with high latency, not a separate routing domain.
-
 ---
 
 ## 5. Reference Implementation — Core Hardware
