@@ -124,7 +124,7 @@ All devices connect to the router as normal. The BGP-X daemon handles everything
 
 BGP-X treats three network classes as equal first-class citizens. No entry point is privileged, none is secondary.
 
-**Clearnet (standard internet)**: You have a standard ISP connection. BGP-X daemon routes your traffic through the onion overlay. No special hardware needed. Commercial satellite services (Starlink, Iridium, etc.) are clearnet domain — they provide BGP-routed IP connectivity with higher latency.
+**Clearnet (standard internet)**: You have a standard ISP connection. BGP-X daemon routes your traffic through the onion overlay. No special hardware needed.
 
 **BGP-X overlay**: The onion-encrypted routing layer itself. Paths may stay within the overlay for additional hops before exiting.
 
