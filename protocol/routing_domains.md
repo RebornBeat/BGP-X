@@ -157,8 +157,6 @@ satellite "starlink-leo":    0x00000005 <BLAKE3("starlink-leo")[0:4]>
 - A BGP-X mesh domain
 - A separate domain per ISP or per satellite provider
 
-**Satellite internet is clearnet**: Commercial satellite providers (Starlink, Iridium, Inmarsat, etc.) provide internet connectivity over BGP-routed infrastructure. A Starlink terminal has a routable internet IP address. Other BGP-X nodes can reach it via UDP/7474 like any clearnet node. From BGP-X's protocol perspective, satellite internet WAN is clearnet — same domain type 0x00000001, same onion layer structure, same handshake protocol. The only difference is latency class.
-
 **Node advertisement for clearnet**:
 ```json
 {
@@ -276,26 +274,6 @@ LoRa and BLE transports require the **MESH_FRAGMENT** message (type 0x19) for pa
 
 **What this domain represents (future)**:
 A constellation of BGP-X relay nodes physically in orbit, communicating via inter-satellite links carrying BGP-X protocol directly, with BGP-X-native ground terminals. This domain would provide relay nodes in orbit with no ground-based network infrastructure involvement in the satellite segment of a path.
-
-**Current restriction**: Any node advertising domain type `0x00000005` in current deployments MUST be rejected by path construction (domain not active). BGP-X nodes receiving DOMAIN_ADVERTISE records for type `0x00000005` SHOULD store them in DHT (future-proofing) but MUST NOT construct paths through them until the BGP-X Satellite specification is activated.
-
-**Commercial satellite services (Starlink, Iridium, etc.) are NOT domain type 0x00000005.** They are clearnet (type 0x00000001). See Section 5.1.
-
-**Activation**: Domain type 0x00000005 will be activated via a MINOR protocol version release when BGP-X Satellite infrastructure is deployed and verified. An extension flag will be added at that time. Until activation, treat `0x00000005` as unknown domain type.
-
----
-
-### 5.6 Satellite Internet is Clearnet — Definitive Clarification
-
-This clarification is repeated here because it is a common source of confusion.
-
-**Question**: Starlink and other satellite providers have satellites in space. Is satellite internet a "satellite domain" in BGP-X?
-
-**Answer**: No. Satellite internet services provide internet connectivity. "The internet" is the clearnet domain. The physical medium (satellite radio instead of fiber) does not change the domain.
-
-**Analogy**: A cellular (4G/5G) connection is also clearnet despite using radio waves instead of cables. The radio medium is a transport layer below BGP-X. BGP-X sees a routable IP address and communicates via UDP — whether the WAN is fiber, cable, 5G, or Starlink is invisible to BGP-X.
-
-**Domain type assignment rule**: If a node has a routable internet IP address and can be reached via standard UDP, it is a clearnet node, regardless of how it connects to the internet.
 
 ---
 
