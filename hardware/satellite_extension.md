@@ -9,10 +9,6 @@
 
 BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite internet modems via USB**, enabling deployment in locations without fiber, cellular, or other terrestrial WAN options.
 
-**Critical Architectural Clarification**: Satellite internet connections are **clearnet** in BGP-X — domain type `0x00000001`. The satellite provides the WAN transport; the BGP-X overlay runs on top identically to fiber, cellular, or cable.
-
-**Domain Type**: Satellite-connected nodes use the standard clearnet domain (`0x00000001`). Domain type `0x00000005` (bgpx-satellite) is RESERVED for a future BGP-X-native satellite network (satellites running BGP-X relay software with inter-satellite links) and is NOT active in current deployments. All commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) are clearnet.
-
 This document covers hardware integration specifics: supported satellite modems, USB auto-detection, driver configuration, power requirements for combined deployments, latency class configuration, and physical deployment considerations.
 
 ---
@@ -414,21 +410,7 @@ max_bandwidth_kbps = 50
 
 ---
 
-## 10. Future Vision — Native BGP-X Satellite Network
-
-While current commercial satellite services are clearnet, the BGP-X architecture reserves **domain type `0x00000005`** for a future native BGP-X satellite network.
-
-**Vision**:
-- Satellites run BGP-X relay software.
-- Inter-satellite laser links carry BGP-X packets directly (no ground station required for relay).
-- BGP-X mesh extends to orbit.
-- Ground stations act as domain bridge nodes between terrestrial clearnet/mesh and the orbital mesh.
-
-**Current Status**: Reserved. No active deployment. All satellite integration today uses domain type `0x00000001` (clearnet).
-
----
-
-## 11. Bill of Materials — Satellite Extension (Per-Deployment)
+## 10. Bill of Materials — Satellite Extension (Per-Deployment)
 
 | Component | Approximate Cost |
 |---|---|
