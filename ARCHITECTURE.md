@@ -639,23 +639,7 @@ Connects to daemon Control Socket. Cross-domain management: domain listing, brid
 
 ---
 
-## 17. Geographic Plausibility Scoring
-
-RTT-based verification of node region claims. **OPTIONAL** — nodes are not required to declare a jurisdiction. If a jurisdiction is declared, geo plausibility scoring applies.
-
-Domain-specific thresholds:
-
-- **Clearnet nodes**: internet RTT thresholds by region pair (EU-EU: 10-100ms; NA-EU: 100-240ms; etc.)
-- **WiFi mesh nodes**: 1-20ms per hop expected; higher RTT is suspicious
-- **LoRa mesh nodes**: 100ms-5000ms per hop expected; NOT flagged for high latency
-- **Domain bridge nodes**: checked independently for each domain they serve
-- **Satellite nodes**: exempt from geographic thresholds; return neutral score 0.5
-
-No external database required. RTT is unforgeable below the speed of light. Discrepancy generates reputation events (GEO_SUSPICIOUS, GEO_IMPLAUSIBLE). Not a hard exclusion — reputation signal only.
-
----
-
-## 18. Extension Points
+## 17. Extension Points
 
 | Extension | Default | Version |
 |---|---|---|
@@ -678,7 +662,7 @@ All extensions are v1. Nothing is deferred.
 
 ---
 
-## 19. Design Decisions Log
+## 18. Design Decisions Log
 
 | Decision | Rationale |
 |---|---|
@@ -713,7 +697,7 @@ All extensions are v1. Nothing is deferred.
 
 ---
 
-## 20. Prior Art Acknowledgment
+## 19. Prior Art Acknowledgment
 
 BGP-X integrates concepts from multiple prior systems:
 
@@ -729,7 +713,7 @@ BGP-X's innovation is unification: combining all of these into one coherent syst
 
 ---
 
-## 21. HTTP Protocol for .bgpx Services
+## 20. HTTP Protocol for .bgpx Services
 
 BGP-X native services (.bgpx) use **HTTP/2 over BGP-X streams**.
 
