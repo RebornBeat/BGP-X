@@ -72,8 +72,6 @@ CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
 
 A **clearnet client with a BGP-X daemon** (no mesh hardware) can reach a service inside a mesh island via a domain bridge node that handles the radio transmission. A **mesh island client** can reach clearnet via a gateway. A path can traverse clearnet → mesh → clearnet. The protocol enforces no entry point restriction and no domain ordering.
 
-**Satellite Internet as Clearnet**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide BGP-routed IP connectivity. They are **clearnet domain (type 0x00000001)**, not a separate "satellite" domain. A satellite-connected node is simply a clearnet node with high latency. Domain type **0x00000005 (`bgpx-satellite`)** is **RESERVED** for a future BGP-X-native satellite network (with relay nodes in orbit) and is NOT active in current deployments.
-
 ---
 
 ## 5. System Layers
