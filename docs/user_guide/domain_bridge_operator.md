@@ -259,7 +259,7 @@ bgpx-cli islands publish your-island-id
 
 ---
 
-## 8. Geographic Declaration
+## 8. Geographic Declaration (Optional)
 
 To declare a jurisdiction:
 
