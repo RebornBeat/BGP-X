@@ -411,15 +411,6 @@ A single relay node cannot link your source IP to your destination — it sees o
 
 BGP-X cannot verify that a node's claimed region/country is accurate (there's no authority to check against). Instead, BGP-X measures the round-trip time (RTT) to each node via KEEPALIVE timing and compares it to the expected range for the node's claimed region.
 
-A node claiming to be in Europe that responds in 400ms from a European client is suspicious (EU-EU should be 8-120ms). This discrepancy generates a reputation penalty (GEO_SUSPICIOUS or GEO_IMPLAUSIBLE events).
-
-**Geographic plausibility scoring is OPTIONAL**:
-
-- If a node declares a jurisdiction: geo plausibility scoring applies
-- If a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-- Nodes are NOT required to declare jurisdiction
-- Declaring jurisdiction is an opt-in privacy/convenience tradeoff
-
 This is not a hard exclusion — it's a reputation signal. Nodes with persistent geographic implausibility accumulate reputation penalties over time.
 
 Mesh nodes have separate thresholds since LoRa hops can be 100ms-5s by design. Satellite nodes are entirely exempt.
