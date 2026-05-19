@@ -656,14 +656,7 @@ bgpx-cli dns test --query example.com --expected overlay
 
 ---
 
-## 13. Geographic Plausibility — OPTIONAL
-
-Geographic plausibility scoring is an OPTIONAL feature in BGP-X:
-
-- If a node declares a jurisdiction: geo plausibility scoring applies
-- If a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-- Nodes are NOT required to declare jurisdiction
-- Declaring jurisdiction is an opt-in privacy/convenience tradeoff
+## 13. Geographic Constraints
 
 Routing policy rules can specify geo-related constraints:
 
