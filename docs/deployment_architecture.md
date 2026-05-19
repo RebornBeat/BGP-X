@@ -37,8 +37,6 @@ BGP-X routes traffic across **routing domains**. A routing domain is a named net
 | LoRa Regional | 0x00000004 | LoRa-only regional channel plan |
 | bgpx-satellite | 0x00000005 | **RESERVED** for future BGP-X-native satellite network; NOT active in current deployments |
 
-**Satellite internet is clearnet**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide BGP-routed IP connectivity. From BGP-X's protocol perspective, a node with Starlink WAN is a clearnet node — domain type 0x00000001 — the same as fiber or cellular, with a higher latency class. Domain type 0x00000005 is reserved for a future BGP-X-native satellite network, not for current commercial satellite services.
-
 **Any-to-any routing**: A path can traverse any combination of domains in any order. A clearnet client can reach a mesh island service. A mesh island user can reach clearnet via a gateway. Two islands can connect via the overlay.
 
 **Domain bridge nodes**: Any BGP-X node with endpoints in 2+ routing domains is a domain bridge. It bridges traffic between those domains without re-encrypting inner onion layers.
