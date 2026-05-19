@@ -45,9 +45,7 @@ Any reliable internet connection serves as the clearnet side of the bridge:
 
 - **Fiber / Cable / DSL**: Standard ISP connection
 - **Cellular (4G/5G)**: Via USB modem or integrated cellular
-- **Satellite internet (Starlink, Iridium, Inmarsat, etc.)**: Treated as **clearnet domain (0x00000001)**. From BGP-X's perspective, satellite internet is simply high-latency clearnet. It is not a separate mesh routing domain.
-
-**Important**: Satellite internet is clearnet. Domain type 0x00000005 is reserved for a future BGP-X-native satellite network (not active in current deployments). A BGP-X bridge using Starlink WAN bridges clearnet (satellite) to mesh.
+- **Satellite internet (Starlink, Iridium, Inmarsat, etc.)**: Treated as **clearnet domain (0x00000001)**.
 
 ### 2.3 Mesh Radio Options
 
