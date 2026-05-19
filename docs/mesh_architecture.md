@@ -21,11 +21,7 @@ This document describes the mesh architecture: island model, transports, discove
 
 ## 2. Satellite is Not Mesh
 
-Before describing mesh, one important clarification: **satellite internet (Starlink, Iridium, Inmarsat, etc.) is NOT a mesh domain in BGP-X**. Satellite internet provides internet connectivity over BGP-routed infrastructure. From BGP-X's protocol perspective, a node with Starlink WAN is a clearnet node — same domain type 0x00000001 as fiber or cellular.
-
 A mesh island gateway using Starlink as its WAN connection is a domain bridge node that bridges the clearnet domain (via Starlink) to the mesh domain (via LoRa or WiFi radio). The satellite provides the clearnet side of the bridge. See `satellite_architecture.md` for the full satellite discussion.
-
-Domain type 0x00000005 (bgpx-satellite) is **RESERVED** for a future BGP-X-native satellite network where satellites themselves run BGP-X relay nodes communicating via inter-satellite links. This is NOT currently active.
 
 ---
 
