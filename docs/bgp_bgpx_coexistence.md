@@ -59,10 +59,6 @@ BGP occupies a layer below BGP-X. BGP-X uses BGP-routed infrastructure as its cl
 
 For mesh deployments, the transport layer is replaced entirely by radio (LoRa, WiFi mesh, BLE) with zero BGP involvement. A mesh island communicates internally with no BGP participation whatsoever.
 
-**Satellite Internet in the Layer Model**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide internet connectivity over satellite radio. From BGP-X's perspective, these are **clearnet domain** (type 0x00000001), not a separate routing domain. They appear in the transport layer alongside fiber and cellular — same UDP/IP, different physical medium.
-
-**Domain type 0x00000005 (bgpx-satellite)** is RESERVED for a future BGP-X-native satellite network where satellites themselves run BGP-X relay software and communicate via inter-satellite links. No current commercial satellite service provides this. Domain type 0x00000005 is reserved and not active in current deployments.
-
 ---
 
 ## 5. What BGP Sees From BGP-X Traffic
