@@ -17,8 +17,6 @@ All listed devices run standard Linux (OpenWrt or Ubuntu/Debian). The BGP-X daem
 
 **Domain Bridge Support column**: indicates whether the device supports domain bridge operation (bridging two or more routing domains simultaneously). Domain bridge support requires appropriate network interfaces for each domain to be bridged.
 
-**Satellite Internet Clarification**: Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) are **clearnet domain** in BGP-X. They provide BGP-routed IP connectivity. From the protocol's perspective, a satellite WAN is a clearnet interface with high latency, not a separate routing domain.
-
 ---
 
 ## 2. OpenWrt Routers
