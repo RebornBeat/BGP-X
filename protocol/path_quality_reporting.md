@@ -73,8 +73,6 @@ Latency buckets are calibrated per routing domain type. This acknowledges that a
 
 **Note**: LoRa latency varies significantly with spreading factor (SF7 ~50ms per hop, SF12 ~2-5 seconds per hop). The bucket ranges accommodate all SF values. A LoRa relay at SF12 reporting bucket 0x02 (1-3s) may be normal for that configuration.
 
-**Note on satellite**: Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) are **clearnet domain (0x00000001)**. They are NOT a separate satellite domain. Domain type 0x00000005 is RESERVED for future BGP-X-native satellite infrastructure and is NOT used in current deployments. Any report claiming domain_id type 0x00000005 MUST be ignored.
-
 ### 2.3 Encryption
 
 The report is encrypted with the client's session key for this specific hop:
