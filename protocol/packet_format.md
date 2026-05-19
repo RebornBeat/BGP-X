@@ -306,7 +306,7 @@ Bytes 4-7: Instance hash (uint32 BE):
            BLAKE3(instance_string_utf8)[0:4] for named domains (mesh, lora-regional)
 ```
 
-**Important**: Commercial satellite internet services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) are **clearnet domain (0x00000001)**, not a separate satellite domain. They provide BGP-routed IP connectivity. Domain type 0x00000005 is RESERVED for a future BGP-X-native satellite network and is NOT active in current deployments. Any DOMAIN_BRIDGE hop with domain type 0x00000005 MUST be rejected as unverifiable.
+**Important**: Any DOMAIN_BRIDGE hop with domain type 0x00000005 MUST be rejected as unverifiable.
 
 ### 8.7 hop_type 0x07 — MESH_ENTRY
 
