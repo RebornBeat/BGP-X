@@ -128,9 +128,7 @@ Yes. The BGP-X Router v1 and Node v1 detect Starlink terminals via USB vendor ID
 
 ### Is satellite internet a separate BGP-X domain?
 
-No. Starlink, Iridium, Inmarsat, HughesNet, Viasat, and all current commercial satellite internet services are **clearnet** in BGP-X — domain type 0x00000001, same as fiber. They provide BGP-routed IP connectivity. BGP-X runs its overlay on top of that connectivity exactly as with any other WAN.
-
-Domain type 0x00000005 is reserved for a future BGP-X-native satellite network (relay nodes physically in orbit, communicating via inter-satellite links with BGP-X protocol). No commercial satellite service provides this today. See `docs/satellite_architecture.md` for the full explanation.
+No. Starlink, Iridium, Inmarsat, and all current commercial satellite services are clearnet domain (0x00000001). See docs/satellite_architecture.md for the complete explanation.
 
 ### What is the minimum hardware to run a relay node?
 
