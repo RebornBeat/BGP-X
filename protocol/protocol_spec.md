@@ -97,10 +97,6 @@ Packets may traverse any combination of routing domains in any order, any number
 
 A clearnet client with a BGP-X daemon and no special hardware can reach a mesh island service. A mesh island client with no ISP can reach clearnet via a gateway. The protocol enforces no entry point restriction and no domain ordering.
 
-**Satellite Internet is Clearnet**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide BGP-routed IP connectivity. From BGP-X's perspective, a node with Starlink WAN is a clearnet node — domain type 0x00000001. The physical medium (satellite radio vs. fiber) is invisible to the BGP-X protocol layer.
-
-**Domain type 0x00000005 (bgpx-satellite)** is RESERVED for a future BGP-X-native satellite network where satellites would be BGP-X relay nodes with inter-satellite links carrying BGP-X protocol directly. This is NOT currently active. Any node advertising domain type 0x00000005 in current deployments MUST be rejected as unverifiable.
-
 ### 3.4 Unified DHT
 
 BGP-X operates one unified Kademlia-style DHT spanning all routing domains. All nodes participate in the same key space regardless of transport or domain. There is no separate mesh DHT. Domain bridge nodes serve as the physical DHT storage infrastructure accessible from the internet for mesh-only nodes.
