@@ -294,8 +294,6 @@ BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections
 - **Iridium Certus 100/350**: Serial modem interface; BGP-X satellite transport driver handles AT commands; GEO latency class (600ms+)
 - **Inmarsat BGAN/FBB**: Similar serial/IP interface; GEO latency class
 
-**Important**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat) provide **internet connectivity over BGP**. From BGP-X's perspective, they are clearnet transports — the same clearnet domain as fiber or cellular, just with higher latency. They are not a separate mesh routing domain. See `satellite_architecture.md` for the full architecture and future vision.
-
 ---
 
 ## 8. Firmware and Software
