@@ -199,8 +199,6 @@ Satellite-connected clearnet nodes (`latency_class = satellite-*`):
 - Excluded from path positions requiring low latency (interactive traffic).
 - Eligible for bulk transfer paths, DHT sync roles, and non-interactive relay positions.
 
-**Clarification**: Commercial satellite internet (Starlink, Iridium, etc.) is **clearnet domain (0x00000001)**, not a separate domain. Satellite nodes are filtered/scored based on latency_class, not domain ID.
-
 ---
 
 ## 4. Scoring Function
