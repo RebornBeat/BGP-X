@@ -912,75 +912,20 @@ BGP-X native services (.bgpx) use HTTP/2 over BGP-X streams.
 
 ---
 
-## 26. Geographic Plausibility — OPTIONAL Feature
-
-Geographic plausibility scoring is an OPTIONAL reputation signal. It is NOT required for BGP-X operation.
-
-### 26.1 When Geo Plausibility Applies
-
-- IF a node declares a jurisdiction in its advertisement: geo plausibility scoring applies
-- IF a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-
-Nodes are NOT required to declare a jurisdiction. Declaring jurisdiction is an opt-in privacy/convenience tradeoff.
-
-### 26.2 Exemptions
-
-The following node types are EXEMPT from geo plausibility scoring (always return neutral score 0.5):
-
-- Satellite-class clearnet nodes (`latency_class = satellite-*`)
-- Mesh nodes without declared jurisdiction
-- Nodes in domains without internet RTT calibration (pure mesh islands without clearnet bridge)
-
-### 26.3 Behavior in Path Construction
-
-A node with poor geo plausibility score:
-
-- Receives lower selection probability (scoring penalty)
-- Can still be selected in a path (not hard excluded)
-- Persistent implausibility may lead to reputation penalties through normal reputation system mechanisms
-
-Geo plausibility is a reputation signal, not a mandatory filtering criterion.
-
----
-
-## 27. Satellite Internet Clarification
-
-**Commercial satellite internet services are clearnet domain (0x00000001).**
-
-This includes:
-- Starlink (LEO, 20-40ms RTT)
-- Iridium Certus (LEO, 150-300ms RTT)
-- Inmarsat (GEO, 600ms+ RTT)
-- HughesNet (GEO, 600ms+ RTT)
-- Viasat (GEO, 600ms+ RTT)
-- OneWeb (LEO, 30-50ms RTT)
-- Kuiper (LEO, 20-40ms RTT)
-
-From BGP-X's perspective, a satellite-connected node is a clearnet node with high latency_class annotation. The physical medium (fiber vs. satellite radio) is invisible to the BGP-X protocol layer.
-
-**Domain type 0x00000005 (bgpx-satellite)** is RESERVED for future BGP-X-native satellite infrastructure where:
-- Satellites themselves run BGP-X relay software
-- Inter-satellite links carry BGP-X packets directly
-- No ground station is required for BGP-X traffic
-
-This is NOT currently active. No commercial satellite service provides this capability. Any node advertising domain type 0x00000005 in current deployments MUST be rejected as unverifiable.
-
----
-
-## 28. Test Vectors
+## 26. Test Vectors
 
 Test vectors for BGP-X packet format verification will be published in `/protocol/test_vectors/` during reference implementation.
 
 Required test vector categories:
 
-### 28.1 Core Onion Layer Vectors
+### 26.1 Core Onion Layer Vectors
 
 1. **Onion layer construction (3-hop path)**: 5 vectors with varying payloads
 2. **Onion layer construction (10-hop path)**: 3 vectors
 3. **Onion layer construction (15-hop path)**: 3 vectors (N-hop unlimited verification)
 4. **Onion layer construction (20-hop path)**: 3 vectors (N-hop unlimited verification)
 
-### 28.2 Hop Type Vectors
+### 26.2 Hop Type Vectors
 
 5. **RELAY (0x01)**: 5 vectors with varying next_hop encodings
 6. **EXIT_TCP (0x02)**: 3 vectors
@@ -992,42 +937,42 @@ Required test vector categories:
 12. **MESH_EXIT (0x08)**: 3 vectors
 13. **MESH_RELAY (0x09)**: 3 vectors
 
-### 28.3 Cross-Domain Specific Vectors
+### 26.3 Cross-Domain Specific Vectors
 
 14. **DOMAIN_BRIDGE onion layer construction**: 5 vectors
 15. **DOMAIN_BRIDGE onion unwrapping at bridge node**: 5 matching vectors
 16. **Cross-domain path_id inclusion in all layers**: 5 vectors (same path_id at every hop)
 
-### 28.4 Path Quality Reporting
+### 26.4 Path Quality Reporting
 
 17. **PATH_QUALITY_REPORT with domain ID (clearnet)**: 3 vectors
 18. **PATH_QUALITY_REPORT with domain ID (mesh)**: 3 vectors
 19. **PATH_QUALITY_REPORT with domain ID (lora-regional)**: 3 vectors
 
-### 28.5 Advertisement Messages
+### 26.5 Advertisement Messages
 
 20. **DOMAIN_ADVERTISE sign and verify**: 3 vectors
 21. **MESH_ISLAND_ADVERTISE sign and verify**: 3 vectors
 22. **MESH_BEACON verification**: 3 vectors
 
-### 28.6 Handshake Vectors
+### 26.6 Handshake Vectors
 
 23. **HANDSHAKE_INIT two-part format**: 5 vectors
 24. **HANDSHAKE_RESP encryption**: 5 vectors
 25. **HANDSHAKE_DONE with path_id**: 5 vectors
 
-### 28.7 Withdrawal and Rotation
+### 26.7 Withdrawal and Rotation
 
 26. **NODE_WITHDRAW signature verification**: 3 vectors
 27. **POOL_KEY_ROTATION dual-signature verification**: 3 vectors
 
-### 28.8 Mesh Fragmentation
+### 26.8 Mesh Fragmentation
 
 28. **MESH_FRAGMENT reassembly (2 fragments)**: 3 vectors
 29. **MESH_FRAGMENT reassembly (5 fragments)**: 3 vectors
 30. **MESH_FRAGMENT reassembly (10 fragments)**: 3 vectors
 
-### 28.9 Negative Test Vectors
+### 26.9 Negative Test Vectors
 
 31. **Invalid domain_id type (0x00000005 - reserved)**: 2 vectors (must reject)
 32. **DOMAIN_BRIDGE with all-zeros domain_id**: 2 vectors (must reject)
@@ -1038,16 +983,16 @@ Required test vector categories:
 37. **Invalid MESH_ISLAND_ADVERTISE signature**: 2 vectors (must reject)
 38. **Replay detection edge cases**: 3 vectors (boundary of sliding window)
 
-### 28.10 Cover Traffic Vectors
+### 26.10 Cover Traffic Vectors
 
 39. **COVER packet indistinguishability**: 3 vectors (COVER and RELAY from same session; verify identical ciphertext size distribution)
 40. **COVER with same session_key as RELAY**: 3 vectors
 
 ---
 
-## 29. Compliance Requirements
+## 27. Compliance Requirements
 
-### 29.1 MUST
+### 27.1 MUST
 
 - Implement common header (Section 3) with bidirectional sequence numbers
 - Implement onion encryption scheme with path_id field in all layers
@@ -1062,7 +1007,7 @@ Required test vector categories:
 - Use session_key for COVER (no separate cover_key)
 - Never log path_id, path composition, or client IPs at relay nodes
 
-### 29.2 MUST NOT
+### 27.2 MUST NOT
 
 - Accept DOMAIN_BRIDGE hops with domain type 0x00000005 (reserved)
 - Accept path_id = 0x00...00 (all zeros)
@@ -1081,7 +1026,7 @@ Required test vector categories:
   - Cross-domain traversal details per session
   - Mesh island identifiers associated with specific sessions
 
-### 29.3 SHOULD
+### 27.3 SHOULD
 
 - Implement geographic plausibility scoring with domain-specific thresholds
 - Support DOMAIN_ADVERTISE and MESH_ISLAND_ADVERTISE message types
