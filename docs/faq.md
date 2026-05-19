@@ -128,7 +128,7 @@ Yes. The BGP-X Router v1 and Node v1 detect Starlink terminals via USB vendor ID
 
 ### Is satellite internet a separate BGP-X domain?
 
-No. Starlink, Iridium, Inmarsat, and all current commercial satellite services are clearnet domain (0x00000001). See docs/satellite_architecture.md for the complete explanation.
+No. Starlink, Iridium, Inmarsat, and all current commercial satellite services are clearnet domain (0x00000001). See `docs/satellite_architecture.md` for the complete explanation.
 
 ### What is the minimum hardware to run a relay node?
 
