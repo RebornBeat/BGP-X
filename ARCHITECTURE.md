@@ -86,8 +86,6 @@ CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
                          All reach all. None is secondary.
 ```
 
-**Satellite internet (Starlink, Iridium, Inmarsat, etc.) is clearnet.** Commercial satellite internet services provide BGP-routed IP connectivity. From BGP-X's protocol perspective, a node with Starlink WAN is a clearnet node — domain type 0x00000001 — the same as fiber or cellular, with a higher latency class. A BGP-X Node v1 with Starlink WAN bridging to a LoRa mesh island is a clearnet-to-mesh domain bridge. The satellite provides the clearnet side of that bridge.
-
 ---
 
 ## 5. System Layers
@@ -198,10 +196,6 @@ Types:
 | mesh:\<island_id\> | 0x00000003 | Named WiFi/LoRa/BLE mesh island | Radio |
 | lora-regional:\<region_id\> | 0x00000004 | LoRa-only regional zone | LoRa |
 | satellite:\<orbit_id\> | 0x00000005 | Satellite connectivity segment | Satellite |
-
-**Important Clarification**:
-- **Satellite internet services (Starlink, Iridium, etc.) are clearnet (0x00000001).** They provide BGP-routed IP connectivity over satellite radio. From BGP-X's perspective, they are clearnet nodes with satellite-class latency.
-- **Domain type 0x00000005 is RESERVED** for a future BGP-X-native satellite network where satellites themselves run BGP-X relay software and communicate via inter-satellite links. This is NOT currently active.
 
 Domain ID wire format: 8 bytes = type (4 bytes BE) + instance hash (4 bytes BE, BLAKE3(instance_string)[0:4] or 0x00000000 for singletons).
 
