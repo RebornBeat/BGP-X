@@ -977,7 +977,7 @@ Your node will automatically publish a DOMAIN_ADVERTISE record to the unified DH
 
 ---
 
-## 14. Geographic Plausibility (Optional)
+## 14. Geographic Declaration (Optional)
 
 Geographic plausibility scoring helps verify that nodes are in their claimed regions via RTT measurements. **This is OPTIONAL**.
 
@@ -986,25 +986,6 @@ Geographic plausibility scoring helps verify that nodes are in their claimed reg
 ```toml
 [node]
 jurisdiction = "EU-DE"  # Optional: declare your legal jurisdiction
-```
-
-If you declare a jurisdiction:
-- BGP-X will measure RTT to peers
-- Compare against expected latency for that region
-- Generate reputation events if implausible
-
-If you do NOT declare a jurisdiction:
-- Geographic plausibility scoring does NOT apply
-- No RTT-based verification
-
-### 14.2 Satellite Connection Exemption
-
-If your standalone device uses satellite internet (Starlink, Iridium, etc.), you are **exempt** from geographic plausibility scoring:
-
-```toml
-[node]
-jurisdiction = "US"           # Optional
-latency_class = "satellite-leo"  # Exempts from geo plausibility
 ```
 
 ---
