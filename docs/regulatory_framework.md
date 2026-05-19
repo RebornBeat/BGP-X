@@ -270,42 +270,7 @@ BGP-X Router v1, Node v1, and Gateway v1 hardware sold in the European Union mus
 
 ---
 
-## 12. Jurisdiction Declaration and Geographic Plausibility
-
-BGP-X nodes may optionally declare a jurisdiction in their advertisement. This enables geographic plausibility scoring — a reputation signal based on whether RTT measurements are consistent with the claimed region.
-
-### 12.1 Jurisdiction Declaration is OPTIONAL
-
-- Nodes are NOT required to declare jurisdiction
-- If jurisdiction is not declared, geo plausibility scoring does NOT apply
-- If jurisdiction IS declared, geo plausibility scoring applies
-- Declaring jurisdiction is an opt-in privacy/convenience tradeoff
-
-### 12.2 Regulatory Implications of Jurisdiction Declaration
-
-If a node declares a jurisdiction:
-
-1. **Consistency**: BGP-X measures RTT to peers and validates that latency is plausible for the claimed region
-2. **Reputation**: Implausible geo scores generate reputation penalties (not hard blocks)
-3. **Transparency**: The declared jurisdiction is visible in the node advertisement (public DHT record)
-
-### 12.3 Why a Node Might NOT Declare Jurisdiction
-
-- Privacy: Don't want to reveal any location information
-- Mobile/vehicle nodes: Location changes
-- Satellite nodes: IP may be geographically distant from terminal location (geo plausibility exempt for satellite-class nodes)
-
-### 12.4 Why a Node Might Declare Jurisdiction
-
-- Reputation: Strong geo plausibility scores are a positive signal
-- Trust: Users may prefer nodes in specific jurisdictions
-- Regulatory compliance: Some operators may be required to disclose location
-
-**BGP-X recommendation**: Jurisdiction declaration is a personal/operational choice. The network functions identically with or without it.
-
----
-
-## 13. Web3 and BGP-X
+## 12. Web3 and BGP-X
 
 Web3 (blockchain protocols, DeFi, NFT platforms, cross-chain systems like OpenAccord) is an **application layer** that runs over the internet using standard protocols (HTTPS, WebSocket, libp2p). It is NOT a separate BGP-X routing domain.
 
