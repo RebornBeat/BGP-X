@@ -786,27 +786,7 @@ Applications SHOULD retry path construction after a delay (default: 5 seconds) w
 
 ---
 
-## 18. Geographic Plausibility in Path Construction
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal.
-
-**Jurisdiction declaration is OPTIONAL.** If a node does NOT declare a jurisdiction in its advertisement, geo plausibility scoring does NOT apply.
-
-Nodes are NOT required to declare a jurisdiction. Declaring jurisdiction is an opt-in privacy/convenience tradeoff.
-
-Geographic plausibility scores (from the reputation system) are integrated into node scoring:
-
-- High plausibility (RTT consistent with claimed region): score bonus
-- Low plausibility (RTT inconsistent): score penalty
-- Persistent implausibility: reputation events accumulate, reducing node score over time
-
-Geo plausibility is a reputation signal, NOT a hard exclusion from path construction. A node with poor geo plausibility can still be selected (with lower probability). Persistent implausibility eventually leads to low reputation and blacklisting through the normal reputation mechanism.
-
-Satellite-connected nodes (latency_class = satellite-*) are EXEMPT from geo plausibility scoring (returns neutral score 0.5).
-
----
-
-## 19. Pool Curator Key Rotation Effects
+## 20. Pool Curator Key Rotation Effects
 
 When a pool curator key rotation is accepted:
 
@@ -818,7 +798,7 @@ When a pool curator key rotation is accepted:
 
 ---
 
-## 20. Offline Island Handling
+## 21. Offline Island Handling
 
 When a mesh island's bridge nodes are all offline:
 - Path construction to destinations within that island: FAIL with ERR_MESH_ISLAND_UNREACHABLE
@@ -828,7 +808,7 @@ When a mesh island's bridge nodes are all offline:
 
 ---
 
-## 21. Bootstrap Path
+## 22. Bootstrap Path
 
 When a client first joins with no DHT knowledge, it needs a bootstrap path to query the DHT.
 
@@ -845,7 +825,7 @@ Bootstrap nodes MUST NOT be used as relay/entry/exit nodes in constructed paths.
 
 ---
 
-## 22. Mesh Island Path Construction
+## 23. Mesh Island Path Construction
 
 Within a mesh island segment, path construction queries the unified DHT with domain filter:
 
@@ -865,7 +845,7 @@ function get_nodes_in_domain_and_pool(domain, pool):
 
 ---
 
-## 23. Complete Path Construction Pseudocode (Single-Domain)
+## 24. Complete Path Construction Pseudocode (Single-Domain)
 
 ```python
 function build_single_domain_path(segment_configs, constraints, fallback_to_default):
