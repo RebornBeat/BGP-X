@@ -283,20 +283,7 @@ HTTP/2 is selected for .bgpx services because BGP-X already provides reliable or
 
 ---
 
-## 12. Geographic Plausibility and Versioning
-
-Geographic plausibility scoring (extension flag bit 5) is an **OPTIONAL** feature:
-
-- If a node declares a jurisdiction in its advertisement: geo plausibility scoring applies
-- If a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-
-Nodes are NOT required to declare jurisdiction. This is an opt-in privacy/convenience tradeoff.
-
-The geographic plausibility algorithm is versioned independently within the reputation system implementation. See `/control-plane/geo_plausibility.md`.
-
----
-
-## 13. Unified DHT Versioning
+## 12. Unified DHT Versioning
 
 BGP-X operates **one unified DHT** spanning all routing domains:
 
