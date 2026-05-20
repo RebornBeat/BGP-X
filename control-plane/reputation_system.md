@@ -421,50 +421,7 @@ If a node advertises bridge capability for a domain it cannot actually reach:
 
 ---
 
-## 10. Geographic Plausibility — OPTIONAL Feature
-
-Geographic plausibility scoring is an OPTIONAL reputation signal. It is NOT required for BGP-X operation.
-
-### 10.1 When Geo Plausibility Applies
-
-- **IF** a node declares a jurisdiction in its advertisement: geo plausibility scoring applies
-- **IF** a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-
-Nodes are NOT required to declare a jurisdiction in their advertisement. Declaring jurisdiction is an opt-in privacy/convenience tradeoff:
-
-- **Pro**: Users can select paths that avoid or prefer specific jurisdictions
-- **Con**: Declaring jurisdiction reveals information about the node's location
-
-### 10.2 Geo Plausibility Events
-
-| Event | RTT Discrepancy | Score Change |
-|---|---|---|
-| GEO_PLAUSIBLE | RTT within expected range | +0.3 |
-| GEO_SUSPICIOUS | RTT 1.5-2× expected | -1.5 |
-| GEO_IMPLAUSIBLE | RTT 2-3× expected | -3.0 |
-| PROTOCOL_VIOLATION_GEO | ≥3 GEO_IMPLAUSIBLE in 7 days | -10.0 |
-
-### 10.3 Exemptions
-
-The following node types are EXEMPT from geo plausibility scoring (always return neutral score 0.5):
-
-- Satellite-class clearnet nodes (`latency_class = satellite-*`)
-- Mesh nodes without declared jurisdiction
-- Nodes in domains without internet RTT calibration (pure mesh islands without clearnet bridge)
-
-### 10.4 Behavior in Path Construction
-
-A node with poor geo plausibility score:
-
-- Receives lower selection probability (scoring penalty)
-- Can still be selected in a path (not hard excluded)
-- Persistent implausibility may lead to reputation penalties through normal reputation system mechanisms
-
-Geo plausibility is a reputation signal, not a mandatory filtering criterion.
-
----
-
-## 11. What Is NEVER Shared in Reputation Data
+## 10. What Is NEVER Shared in Reputation Data
 
 The following items are explicitly prohibited from any reputation record (local or global). They are never transmitted, logged, or stored in any shared format:
 
@@ -486,9 +443,9 @@ Only aggregate counts (e.g., "relay_success: 1240") are shared in global records
 
 ---
 
-## 12. Observation Collection
+## 11. Observation Collection
 
-### 12.1 What Is Observed
+### 11.1 What Is Observed
 
 The reputation system collects observations only from the client's own use of nodes:
 
@@ -499,14 +456,14 @@ The reputation system collects observations only from the client's own use of no
 - Domain bridge transition success/failure
 - Mesh island reachability
 
-### 12.2 What Is NOT Observed
+### 11.2 What Is NOT Observed
 
 - Content of relayed traffic
 - Session identifiers from other clients
 - DHT query behavior from other clients
 - Traffic patterns of other users
 
-### 12.3 Observation Attribution
+### 11.3 Observation Attribution
 
 Observations are attributed to the node that caused the event, as determined by the client's knowledge of path construction:
 
@@ -517,18 +474,18 @@ Observations are attributed to the node that caused the event, as determined by 
 
 ---
 
-## 13. Reputation Persistence
+## 12. Reputation Persistence
 
 The client's reputation database MUST be persisted to disk across restarts.
 
-### 13.1 Storage
+### 12.1 Storage
 
 - **Location**: `data_dir/reputation.db`
 - **Format**: implementation choice (JSON, SQLite, or binary serialization)
 - **Encryption**: encrypted with a key derived from the client's long-term identity key
 - **Write**: atomic (temp file + rename) to prevent corruption
 
-### 13.2 Startup Procedure
+### 12.2 Startup Procedure
 
 On startup:
 
@@ -537,7 +494,7 @@ On startup:
 3. Remove nodes whose advertisements have expired AND last-seen > 30 days ago
 4. Initialize per-domain tracking structures for bridge nodes
 
-### 13.3 Shutdown Procedure
+### 12.3 Shutdown Procedure
 
 On shutdown:
 
@@ -547,7 +504,7 @@ On shutdown:
 
 ---
 
-## 14. Reputation System Metrics
+## 13. Reputation System Metrics
 
 | Metric | Description |
 |---|---|---|
@@ -565,9 +522,9 @@ No node identifiers are included in published metrics. All metrics are aggregate
 
 ---
 
-## 15. Implementation Requirements
+## 14. Implementation Requirements
 
-### 15.1 MUST
+### 14.1 MUST
 
 - Maintain per-node reputation scores in persistent storage
 - Apply score decay based on elapsed time
@@ -582,7 +539,7 @@ No node identifiers are included in published metrics. All metrics are aggregate
 - Provide Control API for blacklist management
 - NEVER share prohibited items listed in Section 11
 
-### 15.2 MUST NOT
+### 14.2 MUST NOT
 
 - Share any prohibited items listed in Section 11 in any record format
 - Allow global reputation to override local observations in conflicts
@@ -592,7 +549,7 @@ No node identifiers are included in published metrics. All metrics are aggregate
 - Store evidence (only evidence_hash) in global blacklist records
 - Maintain separate per-domain overall reputation scores (only per-domain event tracking)
 
-### 15.3 SHOULD
+### 14.3 SHOULD
 
 - Publish global reputation records for nodes with significant observation history
 - Publish blacklist records for confirmed malicious behavior
@@ -604,7 +561,7 @@ No node identifiers are included in published metrics. All metrics are aggregate
 
 ---
 
-## 16. Cross-Domain Path Construction Integration
+## 15. Cross-Domain Path Construction Integration
 
 When constructing cross-domain paths, the reputation system provides:
 
@@ -624,7 +581,7 @@ This ensures bridges that are excellent clearnet relays but unreliable mesh brid
 
 ---
 
-## 17. Session Re-Handshake Integration
+## 16. Session Re-Handshake Integration
 
 When a session approaches 24 hours of age, the client initiates a re-handshake. If re-handshake fails:
 
