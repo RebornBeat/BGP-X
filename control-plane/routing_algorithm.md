@@ -263,34 +263,7 @@ def S_geo_plausibility(node, domain):
 | LoRa | 5000ms max for 0 score | Wider (LoRa is inherently high-latency) |
 | Satellite | Not scored by latency | Skip latency score; return 0.5 neutral |
 
-### 4.4 Geographic Plausibility RTT Thresholds
-
-**Note**: Geo plausibility scoring is OPTIONAL. It applies only if the node has declared a jurisdiction in its advertisement. If no jurisdiction is declared, `S_geo_plausibility` returns neutral (0.5).
-
-Expected one-way RTT ranges per region pair:
-
-| Region Pair | Minimum | Maximum Plausible |
-|---|---|---|
-| Same region | 0ms | 50ms |
-| NA ↔ EU | 50ms | 120ms |
-| NA ↔ AP | 100ms | 200ms |
-| NA ↔ SA | 40ms | 100ms |
-| EU ↔ AP | 100ms | 200ms |
-| EU ↔ AF | 50ms | 150ms |
-| EU ↔ ME | 40ms | 100ms |
-| AP ↔ AF | 150ms | 300ms |
-| All ↔ Satellite | 20ms | 600ms (GEO: up to 700ms) |
-
-Mesh transport thresholds (by transport type):
-
-| Mesh Transport | Expected RTT per Hop |
-|---|---|
-| WiFi 802.11s | 1-20ms |
-| LoRa | 100ms-5000ms |
-| Bluetooth BLE | 10-100ms |
-| Ethernet P2P | <5ms |
-
-### 4.5 Bridge Node Scoring (Specialized)
+### 4.4 Bridge Node Scoring (Specialized)
 
 Bridge nodes require specialized scoring that accounts for uptime in both domains:
 
