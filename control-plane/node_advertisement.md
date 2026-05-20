@@ -751,38 +751,7 @@ Advertisements exceeding 12,288 bytes MUST be rejected.
 
 ---
 
-## 9. Geographic Plausibility — OPTIONAL Feature
-
-Geographic plausibility scoring is an **OPTIONAL** reputation signal. It is NOT required for BGP-X operation.
-
-### When Geo Plausibility Applies
-
-- IF a node declares a jurisdiction (`country` field): geo plausibility scoring MAY apply.
-- IF a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply.
-
-Nodes are NOT required to declare a jurisdiction. Declaring jurisdiction is an opt-in privacy/convenience tradeoff:
-- **Pro**: Users can select paths that avoid or prefer specific jurisdictions.
-- **Con**: Declaring jurisdiction reveals information about the node's location.
-
-### Exemptions
-
-The following node types are EXEMPT from geo plausibility scoring (always return neutral score 0.5):
-- Satellite-class clearnet nodes (`latency_class` indicates satellite link).
-- Mesh nodes without declared jurisdiction.
-- Nodes in domains without internet RTT calibration (pure mesh islands without clearnet bridge).
-
-### Behavior in Path Construction
-
-A node with poor geo plausibility score:
-- Receives lower selection probability (scoring penalty).
-- Can still be selected in a path (not hard excluded).
-- Persistent implausibility may lead to reputation penalties through normal reputation system mechanisms.
-
-Geo plausibility is a reputation signal, not a mandatory filtering criterion.
-
----
-
-## 10. Operator Identity and Multi-Node Management
+## 9. Operator Identity and Multi-Node Management
 
 An operator running multiple BGP-X nodes SHOULD:
 
