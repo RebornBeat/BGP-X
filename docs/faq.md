@@ -218,11 +218,9 @@ It is functional and usable. It is not fast. The browser makes the latency visib
 
 ### Does BGP-X use HTTP/2 or HTTP/3?
 
-For `.bgpx` services: **HTTP/2 over BGP-X streams**. BGP-X already provides reliable ordered delivery at the session layer, so HTTP/2's multiplexing is the right fit. HTTP/3's QUIC would add redundant reliability and congestion control.
+For `.bgpx` services: **HTTP/2 over BGP-X streams**. 
 
 For clearnet sites accessed via BGP-X exit: the exit node negotiates HTTP/3 with the destination if supported. This is standard HTTP/3 over TLS over the exit's clearnet connection — not over BGP-X streams.
-
-For LoRa paths: HTTP/2 multiplexing is critical. Each round-trip on LoRa costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
 
 ### What is a DHT Pool?
 
