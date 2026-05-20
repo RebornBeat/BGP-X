@@ -181,10 +181,6 @@ satellite "starlink-leo":    0x00000005 <BLAKE3("starlink-leo")[0:4]>
 | `satellite-meo` | 100-200ms | O3b mPOWER |
 | `satellite-geo` | 550-700ms | Inmarsat, Viasat, HughesNet GEO |
 
-**Geo plausibility for satellite-class clearnet**: all satellite-class clearnet nodes are **exempt** from geographic plausibility RTT scoring. The plausibility scorer returns `0.5` (neutral) regardless of measured RTT. This is because satellite terminal IP addresses may be geographically distant from the ground station, producing RTTs that appear inconsistent with the claimed region.
-
-**Jurisdiction declaration is OPTIONAL**: For all clearnet nodes (including satellite), declaring a jurisdiction in the node advertisement is optional. Geographic plausibility scoring only applies if a node voluntarily declares a jurisdiction. Nodes are NOT required to declare jurisdiction.
-
 ---
 
 ### 5.2 bgpx-overlay (Type 0x00000002)
@@ -844,40 +840,7 @@ Residual risk: acknowledged. Same fundamental limitation as single-domain timing
 
 ---
 
-## 17. Geographic Plausibility — OPTIONAL Feature
-
-Geographic plausibility scoring is an OPTIONAL reputation signal. It is NOT required for BGP-X operation.
-
-### 17.1 When Geo Plausibility Applies
-
-- IF a node declares a jurisdiction in its advertisement: geo plausibility scoring applies
-- IF a node does NOT declare a jurisdiction: geo plausibility scoring does NOT apply
-
-Nodes are NOT required to declare a jurisdiction in their advertisement. Declaring jurisdiction is an opt-in privacy/convenience tradeoff:
-- **Pro**: Users can select paths that avoid or prefer specific jurisdictions
-- **Con**: Declaring jurisdiction reveals information about the node's location
-
-### 17.2 Exemptions
-
-The following node types are EXEMPT from geo plausibility scoring (always return neutral score 0.5):
-
-- Satellite-class clearnet nodes (`latency_class = satellite-*`)
-- Mesh nodes without declared jurisdiction
-- Nodes in domains without internet RTT calibration (pure mesh islands without clearnet bridge)
-
-### 17.3 Behavior in Path Construction
-
-A node with poor geo plausibility score:
-
-- Receives lower selection probability (scoring penalty)
-- Can still be selected in a path (not hard excluded)
-- Persistent implausibility may lead to reputation penalties through normal reputation system mechanisms.
-
-Geo plausibility is a reputation signal, not a mandatory filtering criterion.
-
----
-
-## 18. Compliance Requirements
+## 17. Compliance Requirements
 
 ### MUST
 
@@ -915,7 +878,7 @@ Geo plausibility is a reputation signal, not a mandatory filtering criterion.
 
 ---
 
-## 19. Test Vectors
+## 18. Test Vectors
 
 Test vectors for routing domain specification verification:
 
@@ -936,60 +899,7 @@ Test vectors will be documented in `/protocol/test_vectors/routing_domains/` dur
 
 ---
 
-## 20. Satellite Domain Clarification (Definitive)
-
-This section provides the authoritative statement on satellite networks in BGP-X.
-
-### 20.1 Commercial Satellite Internet is Clearnet
-
-All commercial satellite internet services are **clearnet domain (0x00000001)**:
-
-| Service | Constellation | Orbit | Latency Class | BGP-X Domain |
-|---|---|---|---|---|
-| Starlink | SpaceX | LEO | satellite-leo (20-60ms) | clearnet (0x00000001) |
-| Iridium Certus | Iridium | LEO | satellite-leo (150-300ms) | clearnet (0x00000001) |
-| OneWeb | Eutelsat OneWeb | LEO | satellite-leo (30-50ms) | clearnet (0x00000001) |
-| Kuiper | Amazon | LEO | satellite-leo (20-40ms) | clearnet (0x00000001) |
-| HughesNet | Hughes | GEO | satellite-geo (600ms+) | clearnet (0x00000001) |
-| Viasat | Viasat | GEO | satellite-geo (600ms+) | clearnet (0x00000001) |
-| Inmarsat | Inmarsat | GEO | satellite-geo (600ms+) | clearnet (0x00000001) |
-
-**Why**: These services provide BGP-routed IP connectivity. A Starlink terminal has a routable internet IP address. BGP-X nodes communicate with it via standard UDP. The physical medium (satellite radio) is a transport layer below BGP-X.
-
-### 20.2 Domain Type 0x00000005 is Reserved
-
-Domain type `0x00000005` (bgpx-satellite) is **reserved for future BGP-X-native satellite infrastructure**:
-
-- Satellites themselves run BGP-X relay software
-- Inter-satellite links carry BGP-X packets directly
-- No ground station required for BGP-X traffic within the satellite segment
-- BGP-X-native ground terminals with direct satellite relay capability
-
-This is NOT provided by any commercial service today. When BGP-X Satellite infrastructure is deployed and verified, domain type 0x00000005 will be activated via a MINOR protocol version release.
-
-**Until activation**: treat `0x00000005` as unknown domain type. Reject DOMAIN_ADVERTISE for this type.
-
-### 20.3 Implications for Path Construction
-
-A BGP-X node with Starlink WAN:
-
-- Is a clearnet node (domain type 0x00000001)
-- May advertise `latency_class = satellite-leo`
-- Is exempt from geo plausibility scoring (satellite terminals may have IPs geographically distant from ground station)
-- Uses the same onion encryption, handshake, and path construction as any other clearnet node
-- May act as a domain bridge if it also has mesh radio endpoints
-
-A mesh island with Starlink gateway:
-
-- The gateway node is a clearnet+mesh domain bridge
-- Clearnet endpoint: Starlink WAN IP
-- Mesh endpoint: LoRa or WiFi mesh radio
-- The mesh island's traffic exits via the gateway's Starlink connection
-- From BGP-X's perspective: standard domain bridge node
-
----
-
-## 21. Glossary
+## 19. Glossary
 
 | Term | Definition |
 |---|---|
