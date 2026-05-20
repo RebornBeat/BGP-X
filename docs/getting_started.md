@@ -265,22 +265,7 @@ Enable with: `[pluggable_transport] enabled = true` in daemon config.
 
 ---
 
-## 17. HTTP/2 for .bgpx Services
-
-BGP-X native services (`.bgpx` addresses) use **HTTP/2 over BGP-X streams**.
-
-HTTP/2 is selected over HTTP/3 because:
-- BGP-X already provides reliable ordered delivery at the session layer.
-- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path.
-- HTTP/3's QUIC would add redundant reliability and congestion control.
-
-HTTP/3 is used at the exit node when connecting to HTTP/3 clearnet servers — this is standard HTTP/3 over TLS over the exit's clearnet connection.
-
-For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on LoRa costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
-
----
-
-## 18. What BGP-X Does Not Do
+## 17. What BGP-X Does Not Do
 
 Be clear about this before deploying:
 
@@ -293,7 +278,7 @@ Be clear about this before deploying:
 
 ---
 
-## 19. Security Recommendations
+## 18. Security Recommendations
 
 When using BGP-X, follow these practices:
 
