@@ -710,18 +710,4 @@ BGP-X integrates concepts from multiple prior systems:
 - **Meshtastic**: demonstrated LoRa mesh viability for community networks
 
 BGP-X's innovation is unification: combining all of these into one coherent system with inter-protocol domain routing, hardware targets, pool-based trust domains, router-level deployment, and no protocol-level restrictions on path length, domain count, or domain ordering.
-
----
-
-## 20. HTTP Protocol for .bgpx Services
-
-BGP-X native services (.bgpx) use **HTTP/2 over BGP-X streams**.
-
-HTTP/2 is selected over HTTP/3 because:
-- BGP-X already provides reliable ordered delivery at the session layer
-- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
-- HTTP/3's QUIC would add redundant reliability and congestion control layers
-
-HTTP/3 is used at the exit node when connecting to HTTP/3 clearnet servers — this is standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
-
 For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on LoRa costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
