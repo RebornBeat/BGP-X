@@ -52,19 +52,6 @@ Every BGP-X routing domain is a first-class participant in a single unified topo
 
 This is ecosystem unification — not "these systems coexist" but "these systems are one system."
 
-### Three Equal Entry Points
-
-```
-CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
-(BGP-routed internet      (onion-encrypted layer)    (radio transport:
- including all satellite                              WiFi mesh, LoRa,
- internet services)                                   Bluetooth BLE)
-        │                         │                         │
-        └─────────────────────────┴─────────────────────────┘
-                    Any combination, any order, unlimited hops
-                         All reach all. None is secondary.
-```
-
 A Meshtastic community in Lima, a privacy-conscious clearnet user in Berlin, and a satellite-connected research station in Antarctica can all participate in the same network, route to each other's services, and maintain end-to-end privacy throughout.
 
 ---
