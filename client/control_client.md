@@ -52,6 +52,8 @@ All of the above are performed by the **bgpx-node daemon**. The client sends com
 
 ## 3. Architecture
 
+### 3.1 High-Level Connection Architecture
+
 ```
 [bgpx-cli or GUI]
         │
@@ -64,7 +66,7 @@ All of the above are performed by the **bgpx-node daemon**. The client sends com
 
 The daemon runs independently of the control client. The daemon continues operating when the control client is not connected. The control client is a management interface, not a required runtime component.
 
-### Client Architecture Diagram
+### 3.2 Client Process Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -109,9 +111,9 @@ The daemon runs independently of the control client. The daemon continues operat
 
 ---
 
-## 4. Connection
+## 4. Connection Model
 
-### 4.1 Local (on same machine as daemon)
+### 4.1 Local Connection (on same machine as daemon)
 
 ```bash
 bgpx-cli status
@@ -124,7 +126,9 @@ The client tries sockets in this order:
 3. `/var/run/bgpx/control.sock` (system daemon)
 4. `~/.bgpx/control.sock` (user daemon)
 
-### 4.2 Remote (via SSH tunnel)
+### 4.2 Remote Connection (via SSH Tunnel)
+
+For managing a daemon on a remote router:
 
 ```bash
 # Terminal 1: Forward control socket
@@ -172,6 +176,14 @@ tcp_auth_token_path = "/etc/bgpx/control_token"
 
 TCP mode requires authentication via token. Use only on trusted networks or with VPN.
 
+Generate auth token:
+
+```bash
+# Generate token
+openssl rand -hex 32 > /etc/bgpx/control_token
+chmod 600 /etc/bgpx/control_token
+```
+
 Client usage with TCP:
 
 ```bash
@@ -191,7 +203,7 @@ bgpx-cli [global-options] <command> [command-options] [arguments]
 ### 5.2 Global Options
 
 | Option | Description |
-|---|---|
+|---|---|---|
 | `--socket <path>` | Path to control socket (default: `/var/run/bgpx/control.sock`) |
 | `--tcp <addr:port>` | TCP endpoint instead of Unix socket |
 | `--token <path>` | Auth token file for TCP connection |
@@ -287,6 +299,9 @@ bgpx-cli paths build <destination> [--domain-segments <json>]
 # Test path to destination
 bgpx-cli paths test --destination "example.com:443"
 
+# Test which rule and path would be used for a destination
+bgpx-cli paths test --destination example.com
+
 # Rebuild a specific path
 bgpx-cli paths rebuild <path_id>
 
@@ -311,6 +326,9 @@ bgpx-cli pools get --pool-id hex...
 
 # Add private pool from file
 bgpx-cli pools add --file /etc/bgpx/my-pool.json
+
+# Add pool from JSON argument
+bgpx-cli pools add --pool <json>
 
 # Remove a pool
 bgpx-cli pools remove --pool-id hex...
@@ -346,6 +364,9 @@ bgpx-cli policy add \
 
 # Add a rule from file
 bgpx-cli policy add --file /etc/bgpx/rules/rule.toml --position 5
+
+# Add a rule from JSON
+bgpx-cli policy add --rule <json> [--position <n>]
 
 # Remove a rule
 bgpx-cli policy remove --rule-id rule-abc123
@@ -425,6 +446,9 @@ bgpx-cli domains bridges [--dht-freshness]
 
 # Test connectivity to a domain
 bgpx-cli domains test --from clearnet --to "mesh:island-1"
+
+# Test connectivity (alternative command)
+bgpx-cli domains test-connectivity <domain>
 
 # Discover bridges between domains
 bgpx-cli domains discover-bridges --from clearnet --to "mesh:island-1"
