@@ -109,32 +109,7 @@ bgpx-cli names withdraw my-service --service-key /etc/bgpx/my-service.key
 
 ---
 
-## 4. HTTP/2 Over BGP-X Streams
-
-**Important**: BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**, not HTTP/3.
-
-### Why HTTP/2, Not HTTP/3
-
-HTTP/2 is selected over HTTP/3 because:
-
-- BGP-X already provides reliable ordered delivery at the session layer
-- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
-- HTTP/3's QUIC would add redundant reliability and congestion control layers
-
-HTTP/3 is used at exit nodes when connecting to HTTP/3 clearnet servers — standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
-
-### Why HTTP/2 Multiplexing Matters for LoRa
-
-For LoRa paths, HTTP/2 multiplexing is critical:
-
-- Each round-trip on LoRa costs 1-5 seconds
-- HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips
-- A single BGP-X path can carry dozens of concurrent HTTP/2 streams
-- This dramatically improves page load times on high-latency mesh paths
-
----
-
-## 5. Simple Static Website Hosting
+## 4. Simple Static Website Hosting
 
 The simplest `.bgpx` service: a static website served directly by `bgpx-serve`:
 
@@ -187,7 +162,7 @@ compress = "br"    # Brotli compression
 
 ---
 
-## 6. Web Application Hosting
+## 5. Web Application Hosting
 
 For a web application (Node.js, Python, Go, Rust, etc.), connect the BGP-X SDK and pass incoming connections to your HTTP/2 server:
 
@@ -276,7 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-## 7. LoRa-Optimized Service Design
+## 6. LoRa-Optimized Service Design
 
 If your service will be accessible from mesh islands via LoRa paths, design for high latency. **LoRa paths introduce 500ms-5 seconds of latency per round-trip.** Standard browsers designed for sub-100ms web experiences will feel unusably slow. BGP-X Browser and BGP-X-native applications are designed to handle LoRa-class latency gracefully.
 
@@ -365,7 +340,7 @@ Your service should work at three levels:
 
 ---
 
-## 8. Hosting a Service Inside a Mesh Island
+## 7. Hosting a Service Inside a Mesh Island
 
 Services registered from a mesh island node are discoverable from clearnet when the island's gateway is online:
 
@@ -407,7 +382,7 @@ For reliability, mesh islands should have **multiple gateway nodes** from differ
 
 ---
 
-## 9. Cross-Domain Service Hosting
+## 8. Cross-Domain Service Hosting
 
 A `.bgpx` service can be hosted in any routing domain and accessed from any other domain:
 
@@ -452,7 +427,7 @@ The clearnet user experiences:
 
 ---
 
-## 10. Monitoring Your Service
+## 9. Monitoring Your Service
 
 ### Check Service Advertisement
 
@@ -510,7 +485,7 @@ curl http://localhost:9090/metrics | grep bgpx_service
 
 ---
 
-## 11. Updating and Migrating a Service
+## 10. Updating and Migrating a Service
 
 ### Content Update (No Address Change)
 
@@ -560,7 +535,7 @@ pkill -f "bgpx-serve.*my-service.key"
 
 ---
 
-## 12. Security Practices
+## 11. Security Practices
 
 ### Key Security
 
@@ -599,7 +574,7 @@ pkill -f "bgpx-serve.*my-service.key"
 
 ---
 
-## 13. Performance Tuning
+## 12. Performance Tuning
 
 ### For Clearnet-Accessible Services
 
@@ -624,7 +599,7 @@ pkill -f "bgpx-serve.*my-service.key"
 
 ---
 
-## 14. Troubleshooting
+## 13. Troubleshooting
 
 ### Service Not Reachable
 
@@ -658,7 +633,7 @@ pkill -f "bgpx-serve.*my-service.key"
 
 ---
 
-## 15. Advanced: Running a Domain Bridge with a Service
+## 14. Advanced: Running a Domain Bridge with a Service
 
 If you're operating a domain bridge node AND hosting a service on the same device:
 
@@ -699,7 +674,7 @@ Your service will be:
 
 ---
 
-## 16. Summary Checklist
+## 15. Summary Checklist
 
 Before going live with your `.bgpx` service:
 
