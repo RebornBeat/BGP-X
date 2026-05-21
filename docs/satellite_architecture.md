@@ -261,26 +261,7 @@ The recommended architecture for a truly remote mesh island with satellite backh
 
 ---
 
-## 8. HTTP Protocol for .bgpx Services Over Satellite
-
-BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**.
-
-This choice is particularly important for satellite-connected paths:
-
-- **HTTP/2 multiplexing** allows fetching multiple resources over a single BGP-X stream
-- **Each round-trip on satellite** adds 20-600ms depending on orbit
-- **HTTP/2 eliminates redundant round-trips** for multi-resource pages and APIs
-- **HTTP/3 is NOT used** within the BGP-X overlay because:
-  - BGP-X already provides reliable ordered delivery at the session layer
-  - HTTP/3's QUIC would add redundant reliability and congestion control layers
-
-**HTTP/3 at exit nodes**: When a BGP-X exit node connects to a clearnet HTTP/3 server, it uses HTTP/3 over TLS over the exit's clearnet connection. This is standard HTTP/3, not over BGP-X streams. The exit negotiates HTTP/3 with the destination normally.
-
-**For LoRa + satellite deployments** (remote mesh islands with satellite backhaul), HTTP/2's multiplexing is especially valuable — multiple resources can be fetched over a single BGP-X stream, reducing round-trips on both the high-latency satellite segment and the high-latency LoRa segment.
-
----
-
-## 9. Protocol Impact Summary
+## 8. Protocol Impact Summary
 
 Satellite clearnet nodes participate in BGP-X protocol identically to fiber/cellular clearnet nodes:
 
@@ -296,7 +277,7 @@ Satellite clearnet nodes participate in BGP-X protocol identically to fiber/cell
 | PATH_QUALITY_REPORT | Identical (domain_id = clearnet) | Identical |
 | Latency thresholds | Satellite-calibrated | Standard internet thresholds |
 
-### 9.1 Unified DHT Participation
+### 8.1 Unified DHT Participation
 
 Satellite clearnet nodes participate in the **same unified DHT** as all other BGP-X nodes:
 
@@ -304,7 +285,7 @@ Satellite clearnet nodes participate in the **same unified DHT** as all other BG
 - **No separate "satellite DHT"**: one unified DHT spanning all routing domains
 - **Mesh-only nodes** behind a satellite-connected domain bridge access the unified DHT via the bridge node's cache
 
-### 9.2 N-Hop Unlimited
+### 8.2 N-Hop Unlimited
 
 Satellite paths have **no protocol-level maximum hop count**. Paths traversing satellite-connected clearnet nodes are subject to the same N-hop unlimited policy as all BGP-X paths:
 
@@ -315,9 +296,9 @@ Satellite paths have **no protocol-level maximum hop count**. Paths traversing s
 
 ---
 
-## 10. Satellite Terminal Hardware Integration
+## 9. Satellite Terminal Hardware Integration
 
-### 10.1 Starlink Gen 3 Integration
+### 9.1 Starlink Gen 3 Integration
 
 **USB Detection**: The Starlink Gen 3 terminal provides a USB-C port that presents as a USB Ethernet adapter. BGP-X daemon detects this via USB vendor ID (`0x48bf:0x0800`) and loads the satellite transport driver.
 
@@ -325,7 +306,7 @@ Satellite paths have **no protocol-level maximum hop count**. Paths traversing s
 
 **Latency Class Auto-Detection**: The BGP-X daemon can detect Starlink latency characteristics and automatically set `latency_class = satellite-leo` based on observed RTT patterns.
 
-### 10.2 Iridium Certus Integration
+### 9.2 Iridium Certus Integration
 
 **Interface**: Serial modem interface (USB-Serial or RS-232). BGP-X satellite transport driver handles AT commands for connection establishment.
 
@@ -342,7 +323,7 @@ baud_rate = 115200
 
 **Bandwidth Constraints**: Iridium Certus bandwidth (88 Kbps to 704 Kbps) limits throughput. BGP-X daemon adapts path quality expectations and congestion thresholds for low-bandwidth satellite connections.
 
-### 10.3 Inmarsat BGAN/FBB Integration
+### 9.3 Inmarsat BGAN/FBB Integration
 
 **Interface**: Similar serial/IP interface to Iridium.
 
@@ -359,9 +340,9 @@ latency_class = "satellite-geo"
 
 ---
 
-## 11. Power and Environmental Considerations
+## 10. Power and Environmental Considerations
 
-### 11.1 Starlink Power Requirements
+### 10.1 Starlink Power Requirements
 
 | Component | Power Draw |
 |---|---|
@@ -375,7 +356,7 @@ latency_class = "satellite-geo"
 - Recommended panel capacity: 300-400W
 - Battery capacity: 200-400 Wh (LiFePO4 recommended)
 
-### 11.2 Iridium Certus Power Requirements
+### 10.2 Iridium Certus Power Requirements
 
 | Component | Power Draw |
 |---|---|
@@ -389,7 +370,7 @@ latency_class = "satellite-geo"
 - Recommended panel capacity: 10-15W
 - Battery capacity: 20-50 Wh
 
-### 11.3 Environmental Protection
+### 10.3 Environmental Protection
 
 Satellite terminals require:
 - **Clear sky view** for satellite line-of-sight
@@ -400,9 +381,9 @@ BGP-X Router v1 outdoor carrier (IP67) combined with Starlink's weather-resistan
 
 ---
 
-## 12. Satellite Domain Type Clarification
+## 11. Satellite Domain Type Clarification
 
-### 12.1 Why Satellite Internet is NOT Domain Type 0x00000005
+### 11.1 Why Satellite Internet is NOT Domain Type 0x00000005
 
 Domain type `0x00000005` is reserved for a future **BGP-X-native satellite network** where:
 
@@ -419,7 +400,7 @@ Domain type `0x00000005` is reserved for a future **BGP-X-native satellite netwo
 - No BGP-X protocol runs on the satellites themselves
 - No direct satellite-to-satellite BGP-X routing
 
-### 12.2 Implementation Requirements
+### 11.2 Implementation Requirements
 
 Current BGP-X implementations MUST:
 
@@ -430,7 +411,7 @@ Current BGP-X implementations MUST:
 
 ---
 
-## 13. Summary
+## 12. Summary
 
 | Aspect | Status |
 |---|---|
