@@ -57,24 +57,7 @@ BGP-X unifies: multi-hop onion routing + mesh transport + clearnet exit + decent
 
 ---
 
-## 4. Three Equal Entry Points
-
-BGP-X treats three network classes as equal first-class citizens. No entry point is privileged or required:
-
-```
-CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
-(BGP-routed internet)     (onion-encrypted layer)    (radio transport)
-        │                         │                         │
-        └─────────────────────────┴─────────────────────────┘
-                    Any combination, any order, unlimited hops
-                         All reach all. None is secondary.
-```
-
-A **clearnet client with a BGP-X daemon** (no mesh hardware) can reach a service inside a mesh island via a domain bridge node that handles the radio transmission. A **mesh island client** can reach clearnet via a gateway. A path can traverse clearnet → mesh → clearnet. The protocol enforces no entry point restriction and no domain ordering.
-
----
-
-## 5. System Layers
+## 4. System Layers
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -159,7 +142,7 @@ A gateway node:
 
 ---
 
-## 6. N-Hop Unlimited
+## 5. N-Hop Unlimited
 
 BGP-X imposes no protocol maximum on path length. The common header has no hop counter. No mechanism drops a packet after N hops. The only minimum is 3 hops.
 
@@ -176,7 +159,7 @@ Applications choose path length based on their threat model and latency toleranc
 
 ---
 
-## 7. Packet Lifecycle
+## 6. Packet Lifecycle
 
 ### Standard App on LAN Device → Clearnet
 
@@ -223,7 +206,7 @@ Applications choose path length based on their threat model and latency toleranc
 
 ---
 
-## 8. Return Path Architecture
+## 7. Return Path Architecture
 
 Return traffic uses a different architecture than outbound:
 
@@ -237,7 +220,7 @@ This means only the exit node and the client can decrypt the response. Intermedi
 
 ---
 
-## 9. Component Dependency Map
+## 8. Component Dependency Map
 
 ```
 Standard App / SDK App
@@ -277,7 +260,7 @@ Path Manager              Pool Manager           Domain Manager
 
 ---
 
-## 10. Key Exchange and Session Establishment
+## 9. Key Exchange and Session Establishment
 
 BGP-X uses a Noise Protocol-inspired key exchange. **Domain-agnostic** — identical whether session is over UDP/IP, WiFi mesh, LoRa, BLE, or satellite.
 
@@ -314,7 +297,7 @@ Sessions exceeding 24 hours SHOULD trigger re-handshake on the same path.
 
 ---
 
-## 11. Node Discovery — Unified DHT
+## 10. Node Discovery — Unified DHT
 
 BGP-X operates **one unified Kademlia-style DHT** spanning all routing domains. All nodes — clearnet, mesh island, satellite — participate in the same key space.
 
@@ -342,7 +325,7 @@ BGP-X operates **one unified Kademlia-style DHT** spanning all routing domains. 
 
 ---
 
-## 12. Trust Model
+## 11. Trust Model
 
 ### Adversary Assumptions
 
@@ -363,7 +346,7 @@ With N-hop path and pool/domain diversity enforcement:
 
 ---
 
-## 13. Deployment Modes
+## 12. Deployment Modes
 
 | Mode | BGP Role | Mesh Transport | ISP Required | Use Case |
 |---|---|---|---|---|
@@ -378,7 +361,7 @@ All modes except Amplifier support cross-domain routing through domain bridge co
 
 ---
 
-## 14. Application Type Model
+## 13. Application Type Model
 
 ### Standard Applications (BGP-X Unaware)
 
@@ -394,7 +377,7 @@ Connects to daemon Control Socket. Cross-domain management: domain listing, brid
 
 ---
 
-## 15. Geographic Plausibility Scoring
+## 14. Geographic Plausibility Scoring
 
 RTT-based verification of node region claims. No external database required. Domain-specific thresholds:
 
@@ -408,7 +391,7 @@ Not a hard exclusion — reputation signal only. Discrepancy generates `GEO_SUSP
 
 ---
 
-## 16. Extension Architecture
+## 15. Extension Architecture
 
 All extensions are v1. Nothing deferred.
 
@@ -430,7 +413,7 @@ All extensions are v1. Nothing deferred.
 
 ---
 
-## 17. Comparison to Tor Architecture
+## 16. Comparison to Tor Architecture
 
 | Property | Tor | BGP-X |
 |---|---|---|
@@ -452,7 +435,7 @@ All extensions are v1. Nothing deferred.
 
 ---
 
-## 18. Implementation Notes
+## 17. Implementation Notes
 
 The reference implementation is in Rust. Design priorities:
 
