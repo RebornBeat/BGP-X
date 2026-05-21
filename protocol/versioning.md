@@ -276,11 +276,6 @@ All protocol changes MUST be documented in CHANGELOG.md with:
 
 HTTP protocol version is independent of BGP-X protocol version:
 
-- **BGP-X native services (.bgpx)**: Use HTTP/2 over BGP-X streams
-- **Clearnet exit connections**: Exit nodes negotiate HTTP version with destination (HTTP/3 if supported)
-
-HTTP/2 is selected for .bgpx services because BGP-X already provides reliable ordered delivery. HTTP/3's QUIC would add redundant reliability. HTTP version is not negotiated via BGP-X extension flags — it is a transport-layer decision above BGP-X.
-
 ---
 
 ## 12. Unified DHT Versioning
