@@ -1,14 +1,38 @@
-# BGP and BGP-X: Coexistence, Layer Relationship, and Domain Routing
+# BGP and BGP-X: Interoperability, Coexistence, and Domain Routing
 
 **Version**: 0.1.0-draft
 
+This document specifies the complete relationship between BGP (Border Gateway Protocol) and BGP-X, including the layer architecture, gateway behavior, the BGP replacement spectrum, coverage gap bridging, NAT traversal, IPv6 support, traffic analysis boundaries, and the precise limits of BGP independence.
+
 ---
 
-## 1. The Core Relationship
+## 1. Core Relationship
 
-BGP-X does not participate in BGP (Border Gateway Protocol). BGP-X uses the BGP-routed internet as one of several transport layers. They operate at different layers with no direct coupling and no interaction protocol.
+BGP-X does not participate in BGP. BGP-X does not modify BGP. BGP-X does not require BGP operators to make any changes. BGP-X uses the public internet — which is routed by BGP — as one transport medium among several.
 
-BGP is the routing protocol that connects the internet's Autonomous Systems. BGP-X is a privacy overlay that runs on top of BGP-routed infrastructure. BGP-X packets appear to every BGP router as ordinary encrypted UDP datagrams — opaque, indistinguishable from any other UDP traffic.
+They operate at different layers with no direct coupling.
+
+```
+BGP-X Application Layer          ← Applications, SDK
+BGP-X Domain Router              ← Cross-domain path construction
+BGP-X Overlay Routing            ← Path selection, onion encryption, unified DHT
+BGP-X Transport (UDP/IP)         ← BGP-X packets as UDP datagrams on clearnet
+BGP-X Transport (Mesh/Satellite) ← BGP-X on radio or satellite transport
+         │
+         │  Clearnet UDP datagrams are ordinary UDP/7474 to BGP routers
+         ▼
+BGP Routing Layer                ← ISP routing, AS-level decisions
+Physical / Link Layer            ← fiber, radio, physical infrastructure
+```
+
+For mesh deployments, the BGP-X Transport layer is replaced by radio (LoRa, WiFi mesh, BLE) with zero BGP involvement. A mesh island's internal traffic is completely invisible to BGP.
+
+This relationship is one-directional in terms of visibility:
+
+- BGP can "see" BGP-X packets (as UDP datagrams with opaque payloads)
+- BGP-X can "see" BGP in the sense that it uses BGP-routed paths between nodes
+- BGP cannot see inside BGP-X packets
+- BGP-X cannot modify BGP routing decisions
 
 ---
 
@@ -63,19 +87,19 @@ For mesh deployments, the transport layer is replaced entirely by radio (LoRa, W
 
 ## 5. What BGP Sees From BGP-X Traffic
 
-To every BGP router along the path between a BGP-X node and any other clearnet BGP-X node:
+To every BGP router along the clearnet path between a BGP-X node and any other clearnet BGP-X node, BGP-X packets appear as:
 
 ```
-Source IP:      Client's WAN IP (or router's WAN IP)
-Destination IP: BGP-X relay node's IP
+Source IP:      Client/router WAN IP
+Destination IP: BGP-X relay node IP
 Protocol:       UDP
 Port:           7474 (default)
 Payload:        Encrypted bytes (opaque)
 ```
 
-BGP cannot see inside. BGP cannot determine these are BGP-X packets. BGP cannot see the actual destination of the traffic.
+BGP cannot see inside. BGP cannot determine these are BGP-X packets. BGP cannot see the actual destination or whether a path is cross-domain.
 
-For cross-domain paths: when traffic traverses a clearnet segment between a domain bridge node and other clearnet relay nodes, BGP sees exactly the same — ordinary UDP between server IPs. BGP cannot determine that the traffic is destined for a mesh island service. BGP cannot see the domain bridge relationship.
+**For cross-domain paths**: when traffic traverses a clearnet segment between a domain bridge node and other clearnet relay nodes, BGP sees exactly the same — ordinary UDP between server IPs. BGP cannot determine that the traffic is destined for a mesh island service. BGP cannot see the domain bridge relationship.
 
 From BGP's perspective, BGP-X overlay traffic is indistinguishable from any other UDP traffic on port 7474.
 
@@ -97,59 +121,74 @@ BGP-X uses ASN information only from node advertisements (self-reported by node 
 
 ---
 
-## 7. BGP and Cross-Domain Routing
-
-BGP-X's cross-domain routing (clearnet ↔ mesh ↔ satellite) uses BGP as a transport for clearnet segments, with zero BGP involvement for other segment types.
-
-### What BGP Sees in a Cross-Domain Path
-
-For a path: clearnet relays → domain bridge → mesh island:
-
-- BGP sees: encrypted UDP datagrams between clearnet servers (client → entry → relay → bridge node)
-- BGP sees: encrypted UDP datagrams from bridge node to its upstream clearnet relay (return path)
-- BGP does NOT see: anything that happens after the bridge node forwards to mesh radio
-- BGP does NOT see: that the traffic is destined for a mesh island service
-- BGP does NOT see: the domain bridge relationship
-
-### Mesh Island Invisibility to BGP
-
-A mesh island's internal traffic — all of it — is completely invisible to BGP. The entire island appears to BGP as a single server: the bridge node's WAN IP address. Every mesh island member's traffic appears to originate from and be destined to that single server IP.
-
-This is analogous to how NAT makes an entire LAN appear as one IP — except that with BGP-X, even the content of connections to/from that IP is encrypted and opaque.
-
-### Cross-Domain Routing as BGP-Independence Mechanism
-
-The degree to which a deployment is BGP-independent is directly determined by which routing domains it operates in:
-
-| Domain of user | BGP involvement for that user |
-|---|---|
-| Clearnet only | Full BGP transport for all hops |
-| Mesh island (no bridge online) | Zero BGP involvement |
-| Mesh island (bridge to clearnet overlay) | Zero direct BGP exposure; gateway mediates |
-| Any-to-any cross-domain path | BGP only for the clearnet segments; zero for mesh segments |
-
----
-
-## 8. Points of Complete Non-Interaction
+## 7. Complete Non-Interaction Table
 
 These elements are fully independent between BGP and BGP-X:
 
 | BGP Domain | BGP-X Domain | Relationship |
 |---|---|---|
-| AS path selection | Overlay path selection | Independent. BGP decides how packets travel between ISPs; BGP-X decides which relay nodes to use. |
-| Prefix announcement | Node advertisement in DHT | Independent. BGP announces IP blocks; BGP-X advertises node capabilities in a private DHT. |
-| BGP peering sessions | BGP-X session handshakes | Independent. BGP peers connect via TCP on port 179; BGP-X sessions use UDP and Noise-inspired handshakes. |
-| Route filters | Exit policy | Independent. BGP route filters control what prefixes are accepted; BGP-X exit policies control what traffic gateways forward. |
-| RPKI Route Origin Authorizations | Node advertisement signatures | Independent. RPKI validates BGP route origins; BGP-X validates node advertisements via Ed25519 signatures. |
-| BGP communities | DHT pool membership | Independent. BGP communities are routing hints between ISPs; BGP-X pools are trust segments within the overlay. |
-| IGP (interior routing) | BGP-X intra-overlay routing | Independent. OSPF/IS-IS route within an AS; BGP-X DHT handles relay node discovery. |
-| BGP hijack detection | Node advertisement signature verification | Independent. |
-| Anycast routing | BGP-X ServiceID addressing | Independent. |
-| MPLS | N/A (BGP-X operates at UDP level) | Independent. |
+| AS path selection | Overlay/cross-domain path selection | Independent |
+| Prefix announcement | Node/island advertisement in unified DHT | Independent |
+| BGP peering (TCP/179) | Session handshakes (UDP/7474) | Independent |
+| Route filters | Exit policy | Independent |
+| RPKI Route Origin Auth | Advertisement Ed25519 signatures | Independent |
+| BGP communities | DHT pool membership | Independent |
+| IGP (OSPF/IS-IS) | BGP-X DHT routing | Independent |
+| BGP hijack detection | Node advertisement signature verification | Independent |
+| Anycast routing | BGP-X ServiceID addressing | Independent |
+| MPLS | N/A (operates at UDP level) | Independent |
 
 ---
 
-## 9. Points of Indirect Interaction
+## 8. Dual-Stack Traffic Separation
+
+On a dual-stack router:
+
+```
+LAN Packet arrives
+         │
+         ▼
+Routing Policy Engine
+(domain-aware: may specify domain_segments for cross-domain path)
+         │
+    ┌────┴──────────────────────┐
+    │                           │
+    ▼                           ▼
+BGP-X overlay path         Standard internet path
+(enters bgpx0 TUN)         (enters WAN directly)
+    │                           │
+    ▼                           ▼
+Onion-encrypted UDP        Plain IP packet
+→ WAN interface            → WAN interface
+    │                           │
+    └────────┬──────────────────┘
+             │
+             ▼
+        ISP router
+             │
+             ▼
+    BGP-routed internet
+```
+
+Both paths use the same WAN connection. Both appear as standard internet traffic at the ISP level. BGP-X traffic is encrypted and appears as UDP/7474. ISP cannot distinguish between them.
+
+---
+
+## 9. BGP Events and BGP-X Effects
+
+| BGP Event | BGP-X Effect | BGP-X Response |
+|---|---|---|
+| BGP route change to relay node IP | IP-level path between nodes changes; overlay sessions unaffected | None required |
+| BGP hijack of relay node IP | Packets may be delivered to wrong host; ChaCha20-Poly1305 prevents decryption/modification | KEEPALIVE timeout → path rebuild |
+| ISP blocks UDP 7474 | Connections to relay nodes fail | Pluggable transport; alternate ports; path rebuild using non-blocked nodes |
+| ISP blocks relay node IP | Connections fail; KEEPALIVE timeout | Path rebuild with alternate nodes |
+| BGP route instability | Latency spikes; possible KEEPALIVE timeout | Path quality monitoring → rebuild if degraded |
+| Anycast routing (CDN) | Exit gateway connects to nearest CDN edge; transparent | None |
+| RPKI route origin invalid | No direct BGP-X effect; potential BGP hijack risk | Recommend RPKI-valid IP for gateway operators |
+
+---
+
+## 10. Points of Indirect Interaction
 
 These BGP-domain events affect BGP-X behavior without direct coupling:
 
@@ -203,39 +242,6 @@ The ISP sees obfuscated UDP traffic that does not match BGP-X signatures. BGP st
 
 ---
 
-## 10. Dual-Stack Traffic Separation — One WAN, Two Routing Planes
-
-On a dual-stack router, BGP and BGP-X share the same physical WAN connection. They do not conflict because they operate at different layers:
-
-```
-LAN Packet arrives
-         │
-         ▼
-Routing Policy Engine (Layer 3.5 — between LAN and WAN)
-         │
-    ┌────┴──────────────────────┐
-    │                           │
-    ▼                           ▼
-BGP-X overlay path         Standard internet path
-(enters bgpx0 TUN)         (enters WAN interface directly)
-    │                           │
-    ▼                           ▼
-Onion-encrypted UDP        Plain IP packet
-→ WAN interface            → WAN interface
-    │                           │
-    └────────┬──────────────────┘
-             │
-             ▼
-        ISP router
-             │
-             ▼
-    BGP-routed internet
-```
-
-Both paths use the same physical WAN cable. BGP-X overlay traffic and standard traffic leave the router on the same interface. The ISP cannot distinguish between them at the IP level (BGP-X appears as ordinary UDP).
-
----
-
 ## 11. Why BGP-X Doesn't Need BGP Participation
 
 BGP participants (ASes, ISPs) announce IP prefixes and exchange routing information. This is necessary for infrastructure operators who own IP space and need other operators to route traffic to them.
@@ -252,20 +258,202 @@ A BGP-X relay node is no different from any other internet-connected server from
 
 ---
 
-## 12. What Happens if an ISP Does BGP Hijacking
+## 12. NAT Traversal
 
-If an ISP or malicious actor hijacks the BGP route to a BGP-X relay node's IP:
+BGP-X nodes that are behind NAT (e.g., home routers, some cloud providers) require special handling.
 
-1. **Content is protected**: ChaCha20-Poly1305 authentication prevents decryption or modification by the hijacker
-2. **Session fails**: KEEPALIVE timeouts detect the node is unresponsive
-3. **Path rebuilds**: Client selects alternate nodes from DHT
-4. **No data leakage**: The hijacker receives BGP-X encrypted UDP datagrams they cannot decrypt
+### 12.1 BGP-X Node Behind NAT (Relay Node)
 
-BGP hijacking cannot compromise the privacy properties of BGP-X sessions in progress. It can cause session disruption (which BGP-X handles via path rebuilding).
+A relay node behind NAT:
+
+- Cannot accept inbound connections from other nodes
+- Cannot advertise a reachable endpoint for the overlay
+- SHOULD NOT advertise itself as a relay, entry, or exit node
+
+BGP-X does not implement NAT traversal for relay nodes. Relay nodes MUST have a publicly reachable UDP endpoint.
+
+### 12.2 BGP-X Client Behind NAT
+
+BGP-X clients (not nodes) do not need a publicly reachable address. The client initiates the handshake to the entry node, and the entry node responds to the client's NAT-translated address. Standard UDP NAT traversal applies:
+
+- The NAT translation is maintained by KEEPALIVE packets (sent every 25 seconds, randomized ±5 seconds)
+- The entry node sees the client's NAT-translated IP (not the client's internal IP)
+
+### 12.3 NAT Detection for Nodes
+
+The node daemon attempts to determine its public IP address via:
+
+1. Checking `public_addr` in configuration (highest priority)
+2. STUN query to a well-known STUN server
+3. HTTP request to an IP-reflection service
+
+If the detected public IP differs from all local interface addresses, the node is behind NAT and will log a warning recommending the operator configure port forwarding or use a public IP host.
+
+### 12.4 Cellular CGNAT
+
+Cellular connections often use CGNAT. Gateway nodes on cellular should:
+
+- Use STUN for public IP detection
+- Or configure a static public IP via their cellular provider (if available)
+- Or rely on relay pools rather than direct entry node operation
 
 ---
 
-## 13. BGP Replacement Spectrum
+## 13. IPv4 and IPv6
+
+BGP-X operates over both IPv4 and IPv6. The overlay protocol itself is IP-version agnostic — the transport (IPv4 or IPv6) is determined by the addresses in node advertisements.
+
+### 13.1 Dual-Stack Operation
+
+A BGP-X node SHOULD advertise both IPv4 and IPv6 endpoints if available. The client selects the endpoint address family based on:
+
+- Its own network capabilities (IPv4-only, IPv6-only, or dual-stack)
+- The address family of available endpoints for the selected node
+
+### 13.2 IPv6 Path Diversity
+
+For diversity enforcement, IPv4 and IPv6 nodes in the same ASN are treated as being in the same AS (ASN diversity check covers both address families). A path with one IPv4 node in AS12345 and one IPv6 node in AS12345 would fail the ASN diversity constraint.
+
+This prevents trivial diversity bypass by switching address families within the same network.
+
+### 13.3 Node Advertisement Example
+
+```json
+{
+  "endpoints": [
+    { "protocol": "udp", "address": "203.0.113.1", "port": 7474 },
+    { "protocol": "udp", "address": "[2001:db8::1]", "port": 7474 }
+  ]
+}
+```
+
+For domain-aware advertisements:
+
+```json
+{
+  "routing_domains": [
+    {
+      "domain_type": "clearnet",
+      "endpoints": [
+        { "protocol": "udp", "address": "203.0.113.1", "port": 7474 },
+        { "protocol": "udp", "address": "[2001:db8::1]", "port": 7474 }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## 14. Traffic Analysis by BGP Participants
+
+BGP participants (ISPs, IXPs, transit providers) with visibility into BGP-X traffic can observe:
+
+- That BGP-X-using clients connect to BGP-X entry nodes (visible as UDP traffic to port 7474)
+- The volume and timing of BGP-X traffic from a specific client
+- That a BGP-X gateway generates UDP traffic to port 7474 (relay traffic) and TCP/UDP traffic to clearnet destinations
+
+BGP participants CANNOT observe:
+
+- The content of any BGP-X packet (encrypted)
+- The routing within the BGP-X overlay (hidden in onion encryption)
+- The relationship between a client's traffic and any specific destination
+- Whether traffic is destined for a mesh island or clearnet service
+- Domain transitions in cross-domain paths
+
+This represents the BGP-X privacy boundary at the network layer. Application-layer protections (HTTPS, TLS) provide additional content privacy at the exit gateway.
+
+---
+
+## 15. Satellite WAN for Bridge Nodes
+
+Bridge nodes with satellite WAN (Starlink, Iridium, etc.) participate in BGP-X exactly as fiber/cellular bridge nodes. The satellite provider uses BGP-routed internet for its backhaul — from BGP-X's perspective, this is just another clearnet transport.
+
+**Satellite internet is clearnet**: Commercial satellite services (Starlink, Iridium, Inmarsat, HughesNet, Viasat, OneWeb, Kuiper) provide BGP-routed IP connectivity. From BGP-X's protocol perspective, a node with Starlink WAN is a clearnet node — domain type 0x00000001. The physical medium (satellite radio vs. fiber) is invisible to the BGP-X protocol layer.
+
+**Domain type 0x00000005** is RESERVED for a future BGP-X-native satellite network where satellites themselves run BGP-X relay software with inter-satellite links. This is NOT currently active. No commercial satellite service provides this capability.
+
+### Configuration Example
+
+```toml
+[[routing_domains]]
+domain_type = "clearnet"
+endpoints = [{ "protocol": "udp", "address": "auto-detect", "port": 7474 }]
+wan_provider = "starlink"
+latency_class = "satellite-leo"  # 20-40ms RTT
+```
+
+Path construction uses satellite-class latency thresholds for geo plausibility scoring. Interactive traffic paths may avoid high-latency satellite segments (configurable via routing policy).
+
+---
+
+## 16. ECH and DNS
+
+When an exit gateway establishes TLS connections to clearnet destinations:
+
+- ECH DNS queries: gateway uses DoH (encrypted DNS) to fetch HTTPS records
+- DoH traffic goes to clearnet (standard BGP-routed) but is encrypted
+- ECH public keys are in DNS HTTPS records (public information)
+- No BGP-specific concerns
+
+ECH configuration at exit nodes:
+- `ech_capable: true` in exit policy
+- DoH resolver configured (default: Quad9)
+- DNSSEC validation enabled
+
+---
+
+## 17. RPKI Recommendations
+
+Resource Public Key Infrastructure (RPKI) validates BGP route origin announcements. It helps prevent BGP hijacking by ensuring that only authorized ASes can announce specific IP prefixes.
+
+BGP-X and RPKI operate at different layers and have no direct coupling:
+
+- RPKI is a BGP-domain mechanism
+- BGP-X relay operators who use RPKI-validated IP space benefit from reduced BGP hijacking risk
+- BGP-X does not require RPKI and does not validate RPKI itself
+- Gateway operators are **recommended** to use RPKI-valid IP space as a defense-in-depth measure
+
+**Recommendation**: Bridge node and gateway operators SHOULD use IP space covered by valid RPKI Route Origin Authorizations. This is defense-in-depth, not a BGP-X protocol requirement.
+
+BGP-X gateway operators are RECOMMENDED to:
+
+- Use IP address space covered by valid RPKI Route Origin Authorizations (ROAs)
+- Ensure their ASN is correctly registered with their RIR
+- Operate on networks with BCP38 anti-spoofing filtering enabled
+
+These measures protect the gateway's IP space from BGP hijacking, which could redirect BGP-X traffic through an adversary-controlled path at the IP level. While BGP-X's onion encryption would protect traffic content even in this scenario, routing integrity reduces the attack surface.
+
+---
+
+## 18. Multiple WAN and Failover
+
+Gateway nodes may have multiple WAN connections:
+
+- **Fiber + cellular backup**: Primary fiber, failover to 4G/5G
+- **Dual ISP**: Load balancing and redundancy
+- **Satellite + terrestrial**: Satellite as backup for remote deployments
+
+BGP-X overlay continues during failover. Sessions survive brief WAN transitions. KEEPALIVE timing should account for satellite-class latency when satellite is active.
+
+---
+
+## 19. Geographic Plausibility and BGP
+
+Geographic plausibility scoring is an OPTIONAL reputation signal in BGP-X. It is:
+
+- NOT required for node operation
+- Applied only if a node voluntarily declares a jurisdiction
+- Based on RTT measurements, not external databases
+- Independent of BGP routing tables or AS path information
+
+BGP-X nodes are NOT required to declare their jurisdiction. Nodes that do declare jurisdiction enable geo plausibility scoring; nodes that do not are unaffected.
+
+Satellite-connected nodes are exempt from geo plausibility scoring because satellite terminal IP addresses may be geographically distant from the ground station that assigned them.
+
+---
+
+## 20. BGP Replacement Spectrum
 
 BGP-X enables a spectrum of BGP-independence depending on deployment mode. This is orthogonal to domain routing depth — they can be combined.
 
@@ -311,7 +499,7 @@ BGP-independence level and domain routing depth can be combined:
 
 ---
 
-## 14. Coverage Gap Bridging via Domain Routing
+## 21. Coverage Gap Bridging via Domain Routing
 
 Two mesh islands that cannot directly connect via radio can be bridged via the clearnet overlay, transparently and privately:
 
@@ -333,44 +521,7 @@ The clearnet relay pool uses BGP as transport for those hops. BGP sees only encr
 
 ---
 
-## 15. RPKI and BGP-X
-
-Resource Public Key Infrastructure (RPKI) validates BGP route origin announcements. It helps prevent BGP hijacking by ensuring that only authorized ASes can announce specific IP prefixes.
-
-BGP-X and RPKI operate at different layers and have no direct coupling:
-
-- RPKI is a BGP-domain mechanism
-- BGP-X relay operators who use RPKI-validated IP space benefit from reduced BGP hijacking risk
-- BGP-X does not require RPKI and does not validate RPKI itself
-- Gateway operators are **recommended** to use RPKI-valid IP space as a defense-in-depth measure
-
-**Recommendation**: Bridge node and gateway operators SHOULD use IP space covered by valid RPKI Route Origin Authorizations. This is defense-in-depth, not a BGP-X protocol requirement.
-
----
-
-## 16. IPv6 and BGP-X
-
-BGP-X supports both IPv4 and IPv6 at the clearnet transport layer. Nodes may advertise both:
-
-```json
-{
-  "routing_domains": [
-    {
-      "domain_type": "clearnet",
-      "endpoints": [
-        { "protocol": "udp", "address": "203.0.113.1", "port": 7474 },
-        { "protocol": "udp", "address": "[2001:db8::1]", "port": 7474 }
-      ]
-    }
-  ]
-}
-```
-
-For diversity enforcement: IPv4 and IPv6 nodes in the same ASN are treated as the same ASN. This prevents trivial diversity bypass by switching address families within the same network.
-
----
-
-## 17. Web3 and BGP-X
+## 22. Web3 and BGP-X
 
 Web3 (blockchain protocols, DeFi, NFT platforms, cross-chain systems like OpenAccord) is an **application layer** that runs over the internet using standard protocols (HTTPS, WebSocket, libp2p). It is NOT a separate BGP-X routing domain.
 
@@ -385,7 +536,7 @@ Web3 traffic benefits from BGP-X privacy (IP addresses hidden from RPC providers
 
 ---
 
-## 18. Honest Limits
+## 23. Honest Limits
 
 BGP-X can make ISPs irrelevant from a surveillance and control perspective. ISP routing decisions, ISP surveillance capability, ISP-level blocking and censorship, dependency on any single ISP or jurisdiction — all can be bypassed.
 
