@@ -52,20 +52,6 @@ BGP-X is a **router-level privacy overlay network and inter-protocol domain rout
 
 ---
 
-## Three Equal Entry Points
-
-BGP-X provides three equal first-class entry points to the network:
-
-| Entry Point | Description | Hardware |
-|---|---|---|
-| **Clearnet** | BGP-routed internet (fiber, cellular, satellite internet — all are clearnet) | Any internet-connected device |
-| **BGP-X Overlay** | Onion-encrypted relay network | Any BGP-X node |
-| **Mesh Islands** | Community radio networks (WiFi mesh, LoRa, BLE) | BGP-X Router v1, BGP-X Node v1 |
-
-No entry point is primary. A mesh-only user in a remote village and a fiber-connected user in a city participate in the same network. A clearnet client with no mesh hardware can reach services hosted in mesh islands via domain bridge nodes.
-
----
-
 ## Routing Domains
 
 BGP-X treats three network classes as equal first-class citizens:
