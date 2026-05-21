@@ -1,6 +1,7 @@
 # BGP-X Hardware
 
 **Version**: 0.1.0-draft
+**License**: CERN-OHL-S v2 (Hardware), MIT (Firmware/Software), CC BY 4.0 (Documentation)
 
 ---
 
@@ -198,7 +199,206 @@ Capabilities with USB adapters:
 
 ---
 
-## 3. Commercial Hardware (Recommended)
+## 3. Capability Requirements (Hardware-Agnostic)
+
+These specifications define the minimum requirements for each hardware tier. Any implementation claiming compliance must meet these capabilities. Specific part numbers listed under "Reference Implementation" are the current recommended choices, not mandatory requirements.
+
+### Tier 1 Capability Requirements
+
+| Capability | Minimum | Router v1 Reference | Node v1 Reference | Gateway v1 Reference |
+|---|---|---|---|---|
+| **CPU** | Dual-core ARM Cortex-A53, ≥1.0 GHz | MT7981B, A53 @ 1.3 GHz | MT7981B, A53 @ 1.0-1.3 GHz | MT7988A, A73 @ 1.8 GHz |
+| **RAM** | 256 MB (relay), 512 MB (bridge), 1 GB (gateway) | 512 MB DDR4 | 256-512 MB DDR4 | 1 GB DDR4 |
+| **Storage (boot)** | 64 MB | 128 MB NAND | 64-128 MB NAND | 128 MB NAND |
+| **Storage (data)** | 2 GB | 8 GB eMMC | 4-8 GB eMMC | 16 GB eMMC |
+| **Network** | 1× GbE minimum | 1× WAN + 3× LAN GbE | Optional 1× GbE WAN | SFP+ + 2× 2.5GbE + 4× LAN |
+| **WiFi** | 802.11s capable (optional on Gateway) | MT7915 (WiFi 6) | MT7915 or MT7612U | Optional via USB |
+| **LoRa** | SPI-connected SX1261/62/68 | SX1262 integrated | SX1262 integrated | USB adapter required |
+| **BLE** | BLE 5.0+ | Integrated module | Integrated module | Optional USB |
+| **Security** | TPM 2.0 recommended | SLB9670 TPM 2.0 | Optional TPM 2.0 | SLB9670 TPM 2.0 |
+| **USB** | 1× USB 2.0+ | 2× USB 3.0 | 1× USB 2.0 | 2× USB 3.0 |
+| **Linux Support** | Mainline 5.15+ or vendor BSP | OpenWrt 23.05 | OpenWrt 23.05 | OpenWrt 23.05 |
+
+### Tier 2 Capability Requirements (Client Node)
+
+| Capability | Minimum | Reference Implementation |
+|---|---|---|
+| MCU | 240 MHz dual-core microcontroller | ESP32-S3 (Xtensa LX7) or nRF52840 (ARM Cortex-M4) |
+| RAM | 256 KB SRAM (minimum) | 512 KB SRAM + 8 MB PSRAM |
+| Flash | 4 MB | 16 MB |
+| LoRa | SPI-connected SX1262 or SX1276 | SX1262 |
+| WiFi | 802.11 b/g/n | Integrated ESP32-S3 WiFi |
+| BLE | BLE 5.0+ | Integrated ESP32-S3 BLE |
+| USB | USB-C or Micro-USB | USB-C (OTG supported) |
+| Power | LiPo battery connector + charging | Internal LiPo + USB charging |
+| Security | Optional ATECC608 | ATECC608B (some variants) |
+
+### Tier 3 Capability Requirements (Adapter)
+
+| Capability | Minimum | Reference Implementation |
+|---|---|---|
+| MCU | ARM Cortex-M4 or Xtensa LX7, ≥240 MHz | ESP32-S3 or nRF52840 |
+| RAM | 256 KB | 512 KB SRAM |
+| Flash | 1 MB | 4-16 MB |
+| LoRa | SPI-connected SX1262 | SX1262 |
+| USB | USB 2.0 Full Speed (12 Mbps) | USB 2.0 FS (native in ESP32-S3) |
+| Interface | USB CDC-ACM or USB HID | USB CDC-ACM |
+| Antenna | External SMA or integrated PCB | SMA female |
+| Power | USB bus power (max 500 mA) | 5V @ 200 mA peak |
+
+---
+
+## 4. Reference Implementation — Core Hardware Details
+
+### 4.1 BGP-X Router v1 Core
+
+| Component | Specification |
+|---|---|
+| SoC | MediaTek MT7981B (Filogic 820) |
+| CPU | ARM Cortex-A53 dual-core, 1.3 GHz |
+| RAM | 512 MB DDR4 |
+| Storage | 128 MB SPI NAND (boot) + 8 GB eMMC 5.1 (data) |
+| Security | Infineon SLB9670 TPM 2.0 |
+| Crypto Engine | MT7981B integrated (AES, SHA acceleration) |
+
+### 4.2 BGP-X Node v1 Core
+
+| Component | Specification |
+|---|---|
+| SoC | MediaTek MT7981B (primary) or Allwinner H3/H5, NXP i.MX8M Mini (low-power) |
+| CPU | ARM Cortex-A53 dual-core or quad-core, 800-1300 MHz |
+| RAM | 256-512 MB DDR4 / LPDDR4 |
+| Storage | 64-128 MB NAND + 4-8 GB eMMC |
+| Security | Optional TPM 2.0 (Infineon SLB9670/SLB9672) |
+
+### 4.3 BGP-X Gateway v1 Core
+
+| Component | Specification |
+|---|---|
+| SoC | MediaTek MT7988A (Filogic 880) |
+| CPU | ARM Cortex-A73 quad-core, 1.8 GHz |
+| NPU | MT7988A integrated Network Processing Unit |
+| RAM | 1 GB DDR4 @ 3200 MHz |
+| Storage | 128 MB SPI NAND + 16 GB eMMC 5.1 |
+| Security | Infineon SLB9670 TPM 2.0 |
+
+### 4.4 Gateway v1 Network Interfaces
+
+| Interface | Specification | Use |
+|---|---|---|
+| SFP+ | 10 Gbps fiber/copper cage | Primary WAN — fiber ISP uplink |
+| WAN 1 | 2.5GbE RJ45 | Secondary WAN or failover |
+| WAN 2 | 2.5GbE RJ45 | Secondary WAN or bonding |
+| LAN × 4 | Gigabit Ethernet RJ45 | Local management / testing |
+| mPCIe | 1× mPCIe slot | 4G/LTE module for WAN backup |
+
+### 4.5 Radio Modules
+
+#### WiFi Module (Integrated on Router and Node)
+
+| Parameter | Specification |
+|---|---|
+| Chipset | MediaTek MT7915 (WiFi 6, 802.11ax) |
+| Bands | 2.4 GHz + 5 GHz simultaneous |
+| 802.11s | Full mesh profile support |
+| Antennas | 2 × U.FL or RP-SMA connectors |
+| Max power | 20 dBm |
+
+#### LoRa Module (Integrated on Router and Node)
+
+| Parameter | Specification |
+|---|---|
+| Chipset | Semtech SX1262 |
+| Frequency | Region SKU: 433, 868, 915 MHz |
+| Output power | Up to +22 dBm |
+| Sensitivity | -148 dBm (SF12) |
+| Interface | SPI |
+
+#### Optional BLE Module
+
+| Parameter | Specification |
+|---|---|
+| Chipset | Nordic nRF52840 |
+| Protocol | Bluetooth 5.0 LE |
+| Max power | +8 dBm |
+| Interface | UART or SPI |
+
+---
+
+## 5. Enclosure Variants
+
+### Router v1 Enclosures
+
+| Variant | IP Rating | Mounting | Use Case |
+|---|---|---|---|
+| Indoor Desktop | IP20 | None | Home, office |
+| Outdoor Mast | IP67 | Mast/pole | Outdoor deployment |
+| Maritime | IP68 | Bulkhead | Marine/waterfront |
+| Industrial | IP67/ATEX | DIN rail | Industrial/hazardous |
+| Mobile/Vehicle | IP65 | Vehicle mount | Mobile mesh |
+
+### Node v1 Enclosures
+
+| Variant | IP Rating | Mounting | Use Case |
+|---|---|---|---|
+| Standard | IP67 | Pole/Wall | Community outdoor relay |
+| Industrial | IP67/ATEX | DIN rail | Industrial environments |
+
+### Gateway v1 Enclosures
+
+| Variant | IP Rating | Mounting | Use Case |
+|---|---|---|---|
+| 1U Rack | IP20 | 19" rack | Datacenter colocation |
+| Outdoor | IP65 | Pole/Wall | Remote operator deployment |
+| Maritime | IP68 | Bulkhead | Marine/offshore |
+
+---
+
+## 6. Domain Bridge Hardware Requirements
+
+Domain bridge nodes require:
+- Both a clearnet network interface (WAN)
+- And at least one mesh radio interface (WiFi mesh or LoRa)
+
+The GL.iNet GL-MT3000 with external LoRa USB module is the recommended minimum-cost domain bridge node. The BGP-X Gateway v1 is recommended for production provider deployments.
+
+**Domain Bridge Hardware Requirements by Transport**:
+
+| Target Domain Transport | Additional Hardware Required |
+|---|---|
+| WiFi 802.11s mesh | 802.11s-capable WiFi radio (most modern WiFi chips) |
+| LoRa mesh | LoRa transceiver module or USB adapter (SX1262/1276 recommended) |
+| Bluetooth BLE | BLE 5.0+ adapter |
+| Satellite | Compatible satellite modem with API access |
+
+**CPU/RAM for bridge nodes**: Domain bridge nodes run two concurrent path_id tables (single-domain and cross-domain). Each table entry is ~128 bytes. At 10,000 concurrent path_id entries per table: ~2.5 MB per table. Bridge nodes handling high cross-domain traffic should provision at least 1 GB RAM; 2 GB recommended for production.
+
+---
+
+## 7. Mesh Island Gateway Hardware Requirements
+
+**Use case**: Bridge between a mesh island and clearnet; publishes island to unified DHT.
+
+**Requirements beyond domain bridge**:
+- Both clearnet (ISP WAN) and mesh radio (WiFi 802.11s or LoRa) operational simultaneously
+- Sufficient LoRa antenna height and gain for island coverage
+
+**Minimum**: 1 BGP-X Node v1 or equivalent + WAN connection + elevated antenna mount.
+**Recommended**: 2+ independent gateways from different operators.
+
+---
+
+## 8. Satellite WAN Integration
+
+BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections** via USB satellite modems:
+
+- **Starlink Gen 3**: USB port on terminal; presents as USB Ethernet adapter; BGP-X daemon detects via USB vendor ID; treats as clearnet domain with LEO latency class (20-40ms)
+- **Iridium Certus 100/350**: Serial modem interface; BGP-X satellite transport driver handles AT commands; GEO latency class (600ms+)
+- **Inmarsat BGAN/FBB**: Similar serial/IP interface; GEO latency class
+
+---
+
+## 9. Commercial Hardware (Recommended)
 
 For operators not building custom hardware, these commercial devices run BGP-X firmware:
 
@@ -216,7 +416,27 @@ See `compatible_hardware.md` for complete list with specifications and installat
 
 ---
 
-## 4. Hardware Selection Guide
+## 10. Compatible Third-Party Hardware
+
+BGP-X daemon runs on existing hardware:
+
+| Hardware | BGP-X Support |
+|---|---|
+| GL.iNet GL-MT3000 | Full (including 802.11s) |
+| GL.iNet GL-MT6000 | Full |
+| Raspberry Pi 4 / 5 | Full |
+| Orange Pi R1 Plus | Full |
+| Banana Pi BPi-R3 | Full |
+| x86 mini PC | Full |
+| Turris Omnia | Full |
+| OpenWrt-compatible | Via opkg package |
+| Meshtastic devices | LoRa modem only (via adaptation layer) |
+
+**Domain Bridge on Third-Party Hardware**: The GL.iNet GL-MT3000 with external LoRa USB module is the recommended minimum-cost domain bridge node. The BGP-X Gateway v1 is recommended for production provider deployments.
+
+---
+
+## 11. Hardware Selection Guide
 
 ### I want to protect my home network and all my devices
 
@@ -252,51 +472,7 @@ See `compatible_hardware.md` for complete list with specifications and installat
 
 ---
 
-## 5. Domain Bridge Hardware Requirements
-
-Domain bridge nodes require:
-- Both a clearnet network interface (WAN)
-- And at least one mesh radio interface (WiFi mesh or LoRa)
-
-The GL.iNet GL-MT3000 with external LoRa USB module is the recommended minimum-cost domain bridge node. The BGP-X gateway hardware (MT7988A) is recommended for production deployments.
-
-**Domain Bridge Hardware Requirements by Transport**:
-
-| Target Domain Transport | Additional Hardware Required |
-|---|---|
-| WiFi 802.11s mesh | 802.11s-capable WiFi radio (most modern WiFi chips) |
-| LoRa mesh | LoRa transceiver module or USB adapter (SX1262/1276 recommended) |
-| Bluetooth BLE | BLE 5.0+ adapter |
-| Satellite | Compatible satellite modem with API access |
-
-**CPU/RAM for bridge nodes**: Domain bridge nodes run two concurrent path_id tables (single-domain and cross-domain). Each table entry is ~128 bytes. At 10,000 concurrent path_id entries per table: ~2.5 MB per table. Bridge nodes handling high cross-domain traffic should provision at least 1GB RAM; 2GB recommended for production.
-
----
-
-## 6. Mesh Island Gateway Hardware Requirements
-
-**Use case**: Bridge between a mesh island and clearnet; publishes island to unified DHT.
-
-**Requirements beyond domain bridge**:
-- Both clearnet (ISP WAN) and mesh radio (WiFi 802.11s or LoRa) operational simultaneously
-- Sufficient LoRa antenna height and gain for island coverage
-
-**Minimum**: 1 BGP-X Node v1 or equivalent + WAN connection + elevated antenna mount.
-**Recommended**: 2+ independent gateways from different operators.
-
----
-
-## 7. Satellite WAN Integration
-
-BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections** via USB satellite modems:
-
-- **Starlink Gen 3**: USB port on terminal; presents as USB Ethernet adapter; BGP-X daemon detects via USB vendor ID; treats as clearnet domain with LEO latency class (20-40ms)
-- **Iridium Certus 100/350**: Serial modem interface; BGP-X satellite transport driver handles AT commands; GEO latency class (600ms+)
-- **Inmarsat BGAN/FBB**: Similar serial/IP interface; GEO latency class
-
----
-
-## 8. Firmware and Software
+## 12. Firmware and Software
 
 | Hardware | OS | BGP-X Component |
 |---|---|---|
@@ -313,7 +489,7 @@ BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections
 
 ---
 
-## 9. Power Requirements Summary
+## 13. Power Requirements Summary
 
 | Device | Idle Power | Max Power | PoE | Solar |
 |---|---|---|---|---|
@@ -328,7 +504,7 @@ BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections
 
 ---
 
-## 10. Enclosure and Environmental Ratings
+## 14. Enclosure and Environmental Ratings
 
 | Device | IP Rating | Temperature | Mounting |
 |---|---|---|---|
@@ -343,9 +519,9 @@ BGP-X Router v1 and BGP-X Node v1 (with WAN) support **satellite WAN connections
 
 ---
 
-## 11. Open Hardware
+## 15. Open Hardware
 
-BGP-X Router v1 and BGP-X Node v1 reference designs are released under **CERN-OHL-S v2** (Strongly Reciprocal Open Hardware License). This means:
+BGP-X Router v1, Node v1, and Gateway v1 reference designs are released under **CERN-OHL-S v2** (Strongly Reciprocal Open Hardware License). This means:
 
 - Anyone may manufacture BGP-X-compatible hardware using the reference designs
 - Modifications must be released under the same license
@@ -356,7 +532,7 @@ Reference design files (KiCad schematics, PCB layouts, BOM, Gerbers) will be pub
 
 ---
 
-## 12. Procurement
+## 16. Procurement
 
 BGP-X native hardware (Router v1, Node v1, Gateway v1) will be available from:
 - Community manufacturers building from open reference designs
