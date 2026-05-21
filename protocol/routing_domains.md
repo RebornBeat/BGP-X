@@ -34,8 +34,6 @@ BGP-X treats three network classes as equal first-class citizens:
 
 No entry point is primary. A mesh-only user in a remote village and a fiber-connected user in a city participate in the same network. A clearnet client with no mesh hardware can reach services hosted in mesh islands via domain bridge nodes.
 
-**Satellite internet (Starlink, Iridium, Inmarsat, etc.) is clearnet.** Commercial satellite services provide BGP-routed IP connectivity. From BGP-X's perspective, satellite internet is clearnet domain type `0x00000001` — the same as fiber or cellular, just with higher latency.
-
 ---
 
 ## 3. N-Hop Unlimited Policy
