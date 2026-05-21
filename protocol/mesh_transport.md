@@ -677,20 +677,7 @@ For a domain bridge node serving both clearnet and a mesh island:
 
 ---
 
-## 13. HTTP/2 over BGP-X Streams for Mesh
-
-BGP-X native services (.bgpx) on mesh islands use HTTP/2 over BGP-X streams.
-
-HTTP/2 is selected over HTTP/3 because:
-- BGP-X already provides reliable ordered delivery at the session layer
-- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
-- HTTP/3's QUIC would add redundant reliability and congestion control layers
-
-For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on LoRa costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
-
----
-
-## 14. Geographic Plausibility for Mesh Nodes
+## 13. Geographic Plausibility for Mesh Nodes
 
 Geographic plausibility scoring is an OPTIONAL reputation signal. For mesh nodes:
 
@@ -702,11 +689,11 @@ Mesh-specific RTT thresholds are substantially higher than internet thresholds d
 
 ---
 
-## 15. Test Vectors
+## 14. Test Vectors
 
 Required mesh transport test vectors for implementation verification:
 
-### 15.1 MESH_BEACON
+### 14.1 MESH_BEACON
 
 | Test ID | Description |
 |---|---|
@@ -714,7 +701,7 @@ Required mesh transport test vectors for implementation verification:
 | `mesh_beacon_2` | Construct and verify MESH_BEACON with bridge_capable=true and served domains |
 | `mesh_beacon_3` | MESH_BEACON with multiple transport types in bitmask |
 
-### 15.2 MESH_FRAGMENT
+### 14.2 MESH_FRAGMENT
 
 | Test ID | Description |
 |---|---|
@@ -724,7 +711,7 @@ Required mesh transport test vectors for implementation verification:
 | `mesh_fragment_4` | Reassembly of fragments received out of order |
 | `mesh_fragment_5` | Fragment timeout after partial receipt (10 seconds) |
 
-### 15.3 Multi-Transport Selection
+### 14.3 Multi-Transport Selection
 
 | Test ID | Description |
 |---|---|---|
@@ -732,7 +719,7 @@ Required mesh transport test vectors for implementation verification:
 | `transport_select_2` | HIGH_LATENCY_OK with WiFi + LoRa available → selects LoRa (for long range) |
 | `transport_select_3` | Packet size 1500 bytes with LoRa only → fragmentation triggered |
 
-### 15.4 Cross-Domain
+### 14.4 Cross-Domain
 
 | Test ID | Description |
 |---|---|
@@ -740,7 +727,7 @@ Required mesh transport test vectors for implementation verification:
 | `cross_domain_2` | Cross-domain path_id routing return traffic across domain boundary |
 | `cross_domain_3` | Clearnet client path construction to mesh island service |
 
-### 15.5 Meshtastic Serial Protocol
+### 14.5 Meshtastic Serial Protocol
 
 | Test ID | Description |
 |---|---|
@@ -748,7 +735,7 @@ Required mesh transport test vectors for implementation verification:
 | `meshtastic_serial_2` | Receive frame via serial protocol |
 | `meshtastic_serial_3` | Status response parsing |
 
-### 15.6 Island Domain ID Derivation
+### 14.6 Island Domain ID Derivation
 
 | Test ID | Description |
 |---|---|
