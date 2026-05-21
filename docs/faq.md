@@ -112,8 +112,6 @@ The Node v1 is for community mesh contributors — people who want to help expan
 
 No — and intentionally so. A dumb LoRa repeater that relays unencrypted LoRa frames at the PHY level breaks end-to-end encryption. BGP-X Node v1 in Range Extension mode provides equivalent coverage benefit while maintaining full BGP-X onion encryption at every hop. Every forwarding device in the BGP-X network is a proper node running the full protocol.
 
-**Retired concept**: The original BGP-X specification included a "BGP-X Amplifier v1" as a separate product category — a minimal LoRa repeater with no BGP-X routing intelligence. This concept has been retired. Use BGP-X Node v1 in Range Extension mode instead.
-
 ### What is the BGP-X Client Node?
 
 A low-cost, battery-powered endpoint for connecting to BGP-X mesh networks. Does not route traffic for others. Based on LILYGO T3S3, T-Beam, Heltec V3, or RAK WisBlock hardware. For individual users, IoT sensors, and portable operation.
