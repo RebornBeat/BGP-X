@@ -120,19 +120,7 @@ All devices connect to the router as normal. The BGP-X daemon handles everything
 
 ---
 
-## 7. Three Equal Entry Points
-
-BGP-X treats three network classes as equal first-class citizens. No entry point is privileged, none is secondary.
-
-**Clearnet (standard internet)**: You have a standard ISP connection. BGP-X daemon routes your traffic through the onion overlay. No special hardware needed.
-
-**BGP-X overlay**: The onion-encrypted routing layer itself. Paths may stay within the overlay for additional hops before exiting.
-
-**Mesh islands**: Community radio networks (WiFi 802.11s, LoRa, Bluetooth). No ISP required within the island. Cross-domain access to/from clearnet via domain bridge nodes. Users in mesh islands can reach clearnet through gateway nodes.
-
----
-
-## 8. N-Hop Unlimited
+## 7. N-Hop Unlimited
 
 BGP-X imposes **no protocol maximum on path length**. Default is 4 hops for single-domain clearnet. You can specify paths with any number of hops across any combination of routing domains.
 
@@ -151,7 +139,7 @@ There is no protocol enforcement of a maximum. Configure paths as needed for you
 
 ---
 
-## 9. Cross-Domain Routing
+## 8. Cross-Domain Routing
 
 BGP-X enables routing between clearnet, overlay, and mesh islands in any combination.
 
@@ -168,7 +156,7 @@ BGP-X enables routing between clearnet, overlay, and mesh islands in any combina
 
 ---
 
-## 10. For LAN Devices — No Configuration Needed
+## 9. For LAN Devices — No Configuration Needed
 
 If your router runs BGP-X, every device on your network is protected without any changes:
 
@@ -178,7 +166,7 @@ If your router runs BGP-X, every device on your network is protected without any
 
 ---
 
-## 11. For Developers — SDK Connection Model
+## 10. For Developers — SDK Connection Model
 
 The BGP-X SDK does NOT implement its own routing. It connects to the daemon:
 
@@ -195,7 +183,7 @@ If the daemon is on a router and your app is on a LAN device:
 
 ---
 
-## 12. Identity in BGP-X
+## 11. Identity in BGP-X
 
 Every node and service has a stable cryptographic identity:
 
@@ -210,7 +198,7 @@ Services (servers, APIs) use **stable identities** that can persist while the un
 
 ---
 
-## 13. DHT Pools
+## 12. DHT Pools
 
 Pools are named, signed collections of BGP-X nodes grouped by trust level. Instead of one flat pool of all relays, you can:
 
@@ -231,7 +219,7 @@ Exit 2 sees: traffic from Exit 1 (not client)
 
 ---
 
-## 14. Encrypted Client Hello (ECH)
+## 13. Encrypted Client Hello (ECH)
 
 When you connect to a clearnet destination through a BGP-X exit node, the exit node must connect to the destination via TLS. Normally, TLS ClientHello includes the Server Name Indication (SNI) — the domain name in plaintext.
 
@@ -243,7 +231,7 @@ Result: even the exit node does not see the domain name in plaintext. The networ
 
 ---
 
-## 15. Mesh Modes
+## 14. Mesh Modes
 
 BGP-X supports operating without any ISP connection:
 
@@ -255,7 +243,7 @@ BGP-X supports operating without any ISP connection:
 
 ---
 
-## 16. Pluggable Transport
+## 15. Pluggable Transport
 
 Your ISP can observe that you're connecting to BGP-X entry nodes (encrypted UDP on port 7474). Pluggable transport obfuscates this traffic pattern to look like something else.
 
@@ -265,7 +253,7 @@ Enable with: `[pluggable_transport] enabled = true` in daemon config.
 
 ---
 
-## 17. What BGP-X Does Not Do
+## 16. What BGP-X Does Not Do
 
 Be clear about this before deploying:
 
@@ -278,7 +266,7 @@ Be clear about this before deploying:
 
 ---
 
-## 18. Security Recommendations
+## 17. Security Recommendations
 
 When using BGP-X, follow these practices:
 
