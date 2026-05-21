@@ -73,22 +73,7 @@ BGP-X unifies: multi-hop onion routing + mesh transport + clearnet exit + decent
 
 ---
 
-## 4. Three Equal Entry Points
-
-```
-CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
-(BGP-routed internet      (onion-encrypted layer)    (radio transport:
- including all satellite                              WiFi mesh, LoRa,
- internet services)                                   Bluetooth BLE)
-        │                         │                         │
-        └─────────────────────────┴─────────────────────────┘
-                    Any combination, any order, unlimited hops
-                         All reach all. None is secondary.
-```
-
----
-
-## 5. System Layers
+## 4. System Layers
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -130,9 +115,9 @@ CLEARNET                  BGP-X OVERLAY             MESH ISLANDS
 
 ---
 
-## 6. Core Components
+## 5. Core Components
 
-### 6.1 BGP-X Router Daemon (bgpx-node)
+### 5.1 BGP-X Router Daemon (bgpx-node)
 
 The single BGP-X routing stack. Runs on the router or standalone device. All other components are clients of this daemon.
 
@@ -154,7 +139,7 @@ Responsibilities:
 - Mesh transport handling
 - Mesh island advertisement propagation to unified DHT
 
-### 6.2 Routing Policy Engine
+### 5.2 Routing Policy Engine
 
 Evaluates each packet or flow and decides:
 - Route via BGP-X overlay (into bgpx0 TUN)
@@ -169,7 +154,7 @@ Rules can specify:
 - Cross-domain path specifications using `domain_segments`
 - Default action for unmatched traffic
 
-### 6.3 Node
+### 5.3 Node
 
 A BGP-X **node** is any participant in the overlay network. Roles:
 
@@ -183,7 +168,7 @@ A BGP-X **node** is any participant in the overlay network. Roles:
 
 NodeID: `BLAKE3(Ed25519_public_key)`
 
-### 6.4 Routing Domains
+### 5.4 Routing Domains
 
 A **Routing Domain** is a named, addressable network segment with its own transport characteristics. BGP-X routes packets *between* routing domains, not just through one.
 
@@ -201,7 +186,7 @@ Domain ID wire format: 8 bytes = type (4 bytes BE) + instance hash (4 bytes BE, 
 
 Domain bridge nodes connect routing domains. Any domain pair is bridgeable. Any path may traverse any combination of domains in any order any number of times.
 
-### 6.5 DHT Pools
+### 5.5 DHT Pools
 
 Pools are named, signed collections of nodes grouped by trust level or operational intent.
 
@@ -214,7 +199,7 @@ Types:
 - **Domain-scoped**: restricted to nodes in a specific routing domain
 - **Domain-bridge**: composed of bridge nodes for a specific domain pair
 
-### 6.6 Unified DHT
+### 5.6 Unified DHT
 
 BGP-X operates **one unified DHT** spanning all routing domains:
 
@@ -231,7 +216,7 @@ Record types in unified DHT:
 - Mesh island records (keyed by island_id)
 - Pool curator key rotation records
 
-### 6.7 Three Local Interfaces
+### 5.7 Three Local Interfaces
 
 **TUN Interface (bgpx0)**:
 - Virtual network interface at OS level
@@ -250,27 +235,27 @@ Record types in unified DHT:
 - JSON-RPC 2.0 text only
 - Full daemon management: status, paths, nodes, pools, domains, domain bridges, mesh islands, policy, reputation
 
-### 6.8 path_id
+### 5.8 path_id
 
 An 8-byte CSPRNG-generated identifier assigned to each path at construction time.
 
 Purpose: enables return traffic routing without leaking path composition. Each relay node stores `path_id → predecessor_address` in memory. For cross-domain paths, domain bridge nodes additionally store `path_id → domain_a_predecessor` and `path_id → domain_b_predecessor` in their cross-domain path table. Return traffic is forwarded opaquely using these mappings across domain boundaries — intermediate relays do NOT decrypt return traffic.
 
-### 6.9 Client Application
+### 5.9 Client Application
 
 The `bgpx-cli` configuration client and any GUI tools. This is NOT a routing stack. It connects to the daemon via the Control Socket. Provides cross-domain management: domain listing, bridge node discovery, mesh island status, cross-domain path testing.
 
-### 6.10 SDK
+### 5.10 SDK
 
 A library that BGP-X native applications use to connect to the daemon SDK Socket. Exposes `RoutingDomain` in `PathConfig` and `DomainSegmentConfig`, enabling applications to specify cross-domain paths. The SDK does not implement its own routing — the daemon handles all construction, handshakes, and crypto.
 
 ---
 
-## 7. Hardware Ecosystem
+## 6. Hardware Ecosystem
 
 BGP-X provides purpose-built hardware for every deployment context. All hardware is **adaptable by design**: reference implementations use current commodity components, but the firmware and daemon are hardware-agnostic. Future revisions may substitute different SoCs, custom BGP-X ASICs, or alternative radio chipsets without protocol changes.
 
-### 7.1 BGP-X Router v1 — End User All-in-One
+### 6.1 BGP-X Router v1 — End User All-in-One
 
 The primary user-facing product. **Replaces a standard home or office router entirely.** One device provides all BGP-X capabilities:
 
@@ -286,7 +271,7 @@ The primary user-facing product. **Replaces a standard home or office router ent
 
 Reference hardware: ARM dual-core Cortex-A53 @ 1.3 GHz (MT7981B), 512 MB RAM, TPM 2.0, SX1262 LoRa, MT7915 WiFi 6. Carrier boards: desktop, outdoor IP67, DIN rail, 1U rack. All deployment scenarios (mast, solar, vehicle, maritime, aerial, underground) use the outdoor IP67 carrier.
 
-### 7.2 BGP-X Node v1 — Community Contributor
+### 6.2 BGP-X Node v1 — Community Contributor
 
 A compact multi-radio BGP-X node for community mesh expansion. **Adds to an existing network; does not replace a home router.** Configurable operating modes via software:
 
@@ -298,11 +283,11 @@ A compact multi-radio BGP-X node for community mesh expansion. **Adds to an exis
 
 Solar and battery native. Default IP67 outdoor enclosure. Reference: low-power ARM Cortex-A53, 256-512 MB RAM, SX1262 LoRa, 802.11s WiFi, BLE, solar MPPT.
 
-### 7.3 BGP-X Gateway v1 — Provider Infrastructure
+### 6.3 BGP-X Gateway v1 — Provider Infrastructure
 
 High-throughput provider-grade exit node and domain bridge. **For ISPs, hosting providers, and enterprise operators.** Not a consumer product. Reference: ARM quad-core Cortex-A53 @ 1.8 GHz (MT7988A), 1 GB RAM, SFP+ uplink, 2×2.5GbE WAN, >1 Gbps throughput target.
 
-### 7.4 BGP-X Client Node — Tier 2
+### 6.4 BGP-X Client Node — Tier 2
 
 Low-cost, battery-powered endpoint for connecting to BGP-X mesh networks. **Does not route traffic for others.**
 
@@ -310,19 +295,19 @@ Reference hardware: LILYGO T3S3, T-Beam, Heltec V3, RAK WisBlock.
 Firmware: BGP-X Client Firmware (subset of protocol).
 Use: Individual users, IoT sensors, portable operation.
 
-### 7.5 BGP-X Adapter/Dongle — Tier 3
+### 6.5 BGP-X Adapter/Dongle — Tier 3
 
 USB LoRa modem for existing computers. **Pure radio interface.** The BGP-X daemon runs on the host computer.
 
-### 7.6 BGP-X OpenWrt Package
+### 6.6 BGP-X OpenWrt Package
 
 Software-only package for compatible third-party routers (GL.iNet GL-MT6000, Banana Pi BPi-R3, Raspberry Pi 4/5, x86 servers). Community members contribute without purchasing new hardware. Domain bridge capable with USB adapters.
 
 ---
 
-## 8. Traffic Flow (Full End-to-End)
+## 7. Traffic Flow (Full End-to-End)
 
-### 8.1 Standard App on LAN Device → Clearnet (Single Domain)
+### 7.1 Standard App on LAN Device → Clearnet (Single Domain)
 
 ```
 1. App sends packet to OS network stack
@@ -363,7 +348,7 @@ Software-only package for compatible third-party routers (GL.iNet GL-MT6000, Ban
 20. Daemon writes response to TUN → OS delivers to application
 ```
 
-### 8.2 Cross-Domain: Clearnet Client → Mesh Island Service
+### 7.2 Cross-Domain: Clearnet Client → Mesh Island Service
 
 ```
 1. App sends packet; routing policy matches cross-domain rule
@@ -409,7 +394,7 @@ Software-only package for compatible third-party routers (GL.iNet GL-MT6000, Ban
 
 The clearnet client has no mesh hardware. B1 handles all radio transmission. The mesh service never sees the client's clearnet IP. The clearnet relays never know the destination is a mesh service.
 
-### 8.3 SDK App → BGP-X Native Service (Single Domain)
+### 7.3 SDK App → BGP-X Native Service (Single Domain)
 
 ```
 1. SDK app calls client.connect_stream("bgpx://service_id_hex")
@@ -421,7 +406,7 @@ The clearnet client has no mesh hardware. B1 handles all radio transmission. The
 7. App reads/writes as normal TCP connection
 ```
 
-### 8.4 Mesh Node → Clearnet (via Domain Bridge / Gateway)
+### 7.4 Mesh Node → Clearnet (via Domain Bridge / Gateway)
 
 ```
 1. Mesh device sends packet to BGP-X mesh daemon
@@ -436,9 +421,9 @@ The clearnet client has no mesh hardware. B1 handles all radio transmission. The
 
 ---
 
-## 9. Identity Model
+## 8. Identity Model
 
-### 9.1 Node Identity
+### 8.1 Node Identity
 
 ```
 (node_private_key, node_public_key)  ← Ed25519 long-term keypair
@@ -447,11 +432,11 @@ NodeID = BLAKE3(node_public_key)     ← 32 bytes
 
 Used for: signing advertisements, establishing sessions, reputation tracking. Same keypair for all routing domains a node serves.
 
-### 9.2 Client Identity
+### 8.2 Client Identity
 
 Ephemeral by default — fresh Ed25519 keypair generated per session, destroyed after handshake. Long-term client identity supported for authenticated services but not recommended for general use.
 
-### 9.3 Service Identity
+### 8.3 Service Identity
 
 ```
 ServiceID = Ed25519 public key  ← stable, long-term
@@ -459,7 +444,7 @@ ServiceID = Ed25519 public key  ← stable, long-term
 
 Services register reachability in unified DHT. Services can be in any routing domain (clearnet-accessible, mesh-island-local, or any domain).
 
-### 9.4 Pool Curator Identity
+### 8.4 Pool Curator Identity
 
 ```
 curator_private_key, curator_public_key  ← Ed25519, separate from node key
@@ -467,7 +452,7 @@ curator_private_key, curator_public_key  ← Ed25519, separate from node key
 
 Pool curators sign pool advertisements and member records. Key rotatable via dual-signature rotation records.
 
-### 9.5 Routing Domain and Mesh Island Identity
+### 8.5 Routing Domain and Mesh Island Identity
 
 ```
 Domain ID:    domain_type (uint32 BE) || BLAKE3(instance_string)[0:4] (uint32 BE)
@@ -478,9 +463,9 @@ Island IDs should be descriptive and geographically specific to minimize collisi
 
 ---
 
-## 10. Trust Model
+## 9. Trust Model
 
-### 10.1 Adversary Assumptions
+### 9.1 Adversary Assumptions
 
 - May control any subset of relay nodes in any routing domain
 - May observe all public internet traffic (global passive adversary)
@@ -489,7 +474,7 @@ Island IDs should be descriptive and geographically specific to minimize collisi
 - May observe mesh radio traffic
 - Does NOT compromise the client's device
 
-### 10.2 Privacy Guarantees
+### 9.2 Privacy Guarantees
 
 With N-hop path and pool/domain diversity enforcement:
 
@@ -500,7 +485,7 @@ With N-hop path and pool/domain diversity enforcement:
 - Cover traffic (same session_key as RELAY, externally identical) disrupts timing correlation
 - Cross-domain paths: adversary observing clearnet cannot link to mesh island traffic without simultaneously observing mesh radio
 
-### 10.3 What BGP-X Does NOT Guarantee
+### 9.3 What BGP-X Does NOT Guarantee
 
 - Protection against compromised client device
 - Protection against application-layer identity leakage
@@ -510,7 +495,7 @@ With N-hop path and pool/domain diversity enforcement:
 
 ---
 
-## 11. Threat Model Summary
+## 10. Threat Model Summary
 
 | Adversary | BGP-X Protection |
 |---|---|
@@ -530,13 +515,13 @@ With N-hop path and pool/domain diversity enforcement:
 
 ---
 
-## 12. Comparison to Existing Systems
+## 11. Comparison to Existing Systems
 
-### 12.1 vs. VPN
+### 11.1 vs. VPN
 
 A VPN routes all traffic through a single trusted provider. The VPN provider sees source, destination, and content (unless HTTPS). BGP-X distributes trust across N hops with no single party able to see both ends.
 
-### 12.2 vs. Tor
+### 11.2 vs. Tor
 
 | Dimension | Tor | BGP-X |
 |---|---|---|
@@ -553,25 +538,25 @@ A VPN routes all traffic through a single trusted provider. The VPN provider see
 | Pool-based trust | No | Yes |
 | Hardware ecosystem | No | Yes (Router, Node, Gateway, Client, Adapter) |
 
-### 12.3 vs. I2P (Invisible Internet Project)
+### 11.3 vs. I2P (Invisible Internet Project)
 
 I2P uses garlic routing (multiple messages bundled) and is primarily designed for internal services. BGP-X is designed for full internet access with gateway exit nodes, and integrates at the network layer rather than the application layer.
 
-### 12.4 vs. cjdns/Yggdrasil
+### 11.4 vs. cjdns/Yggdrasil
 
 cjdns and Yggdrasil provide public key addressing with mesh transport but no onion routing and no anonymity. BGP-X adds onion encryption, multi-hop paths, pool trust domains, and hardware targets.
 
-### 12.5 vs. Reticulum
+### 11.5 vs. Reticulum
 
 Reticulum provides multi-transport mesh capability (LoRa, WiFi, serial) but no onion routing, no clearnet exit model, and no hardware ecosystem. BGP-X integrates multi-transport mesh AND onion routing AND clearnet exit AND hardware.
 
-### 12.6 vs. SCION
+### 11.6 vs. SCION
 
 SCION (Scalability, Control, and Isolation On Next-generation networks) provides path-aware, source-selected routing at the infrastructure level, requiring ISP adoption. BGP-X achieves similar path control as an overlay without any infrastructure changes.
 
 ---
 
-## 13. BGP and BGP-X Layer Relationship
+## 12. BGP and BGP-X Layer Relationship
 
 BGP-X does not participate in BGP. BGP-X uses the public internet — which is routed by BGP — as one transport medium among several. BGP is unmodified dumb transport.
 
@@ -592,7 +577,7 @@ For mesh deployments, the transport layer is replaced by radio with zero BGP inv
 
 ---
 
-## 14. Deployment Modes
+## 13. Deployment Modes
 
 | Mode | BGP Role | Mesh Transport | ISP Required | Use Case |
 |---|---|---|---|---|
@@ -605,7 +590,7 @@ For mesh deployments, the transport layer is replaced by radio with zero BGP inv
 
 ---
 
-## 15. BGP Replacement Spectrum
+## 14. BGP Replacement Spectrum
 
 | Level | BGP Role | BGP-X Role | User BGP Exposure |
 |---|---|---|---|
@@ -621,7 +606,7 @@ Domain routing enhances Levels 2 and above: mesh island users have zero BGP expo
 
 ---
 
-## 16. Application Type Model
+## 15. Application Type Model
 
 ### Standard Applications (BGP-X Unaware)
 
@@ -637,7 +622,7 @@ Connects to daemon Control Socket. Cross-domain management: domain listing, brid
 
 ---
 
-## 17. Extension Points
+## 16. Extension Points
 
 | Extension | Default | Version |
 |---|---|---|
@@ -660,7 +645,7 @@ All extensions are v1. Nothing is deferred.
 
 ---
 
-## 18. Design Decisions Log
+## 17. Design Decisions Log
 
 | Decision | Rationale |
 |---|---|
@@ -695,7 +680,7 @@ All extensions are v1. Nothing is deferred.
 
 ---
 
-## 19. Prior Art Acknowledgment
+## 18. Prior Art Acknowledgment
 
 BGP-X integrates concepts from multiple prior systems:
 
