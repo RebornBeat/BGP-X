@@ -369,15 +369,3 @@ BGP-X Client Node and Adapter hardware:
 Compatible third-party hardware is commercially available from GL.iNet, Raspberry Pi, and other vendors. See `compatible_hardware.md`.
 
 Meshtastic hardware for LoRa adaptation is available from LILYGO, Heltec, RAK Wireless, and other vendors. See `meshtastic_adapter.md`.
-
----
-
-## 13. Note on Broadcast Amplifier (Deprecated Concept)
-
-The original BGP-X specification included a "BGP-X Amplifier v1" as a separate product category — a minimal LoRa repeater on STM32H7 with no BGP-X routing intelligence.
-
-**This concept has been retired.**
-
-The BGP-X Node v1 in Range Extension mode provides equivalent coverage extension while maintaining full BGP-X encryption at every hop. A pure PHY-level amplifier that relays traffic without encryption introduces a security vulnerability — traffic would be exposed at the relay's radio interface.
-
-The Node v1 Range Extension mode is the correct solution for range extension use cases. The STM32H7 is not suitable for running the full BGP-X daemon (requires Linux for async I/O, full crypto stack, DHT).
