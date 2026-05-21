@@ -296,7 +296,7 @@ A compact multi-radio BGP-X node for community mesh expansion. **Adds to an exis
 - Range Extension: low-overhead relay, prioritizes forwarding
 - LoRa-only, WiFi-only, or all radios simultaneously
 
-Solar and battery native. Default IP67 outdoor enclosure. Replaces the earlier "BGP-X Amplifier v1" concept — a BGP-X Node v1 in Range Extension mode provides all coverage benefits of a dumb amplifier while maintaining full end-to-end BGP-X encryption. Reference: low-power ARM Cortex-A53, 256-512 MB RAM, SX1262 LoRa, 802.11s WiFi, BLE, solar MPPT.
+Solar and battery native. Default IP67 outdoor enclosure. Reference: low-power ARM Cortex-A53, 256-512 MB RAM, SX1262 LoRa, 802.11s WiFi, BLE, solar MPPT.
 
 ### 7.3 BGP-X Gateway v1 — Provider Infrastructure
 
@@ -602,8 +602,6 @@ For mesh deployments, the transport layer is replaced by radio with zero BGP inv
 | Mesh Node | None | Required | No | Community without ISP |
 | Gateway Node (Domain Bridge) | WAN for clearnet exit | Both | At gateway | Bridge mesh to internet |
 | Range Extension Node | None | Single transport | No | Coverage extension via Node v1 |
-
-**Note**: The "Broadcast Amplifier" concept has been retired. A BGP-X Node v1 in Range Extension mode provides equivalent coverage benefits while maintaining full end-to-end BGP-X encryption.
 
 ---
 
