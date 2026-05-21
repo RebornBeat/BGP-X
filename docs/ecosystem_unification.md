@@ -385,22 +385,7 @@ All three of these users — end user, community contributor, provider — are p
 
 ---
 
-## 14. HTTP/2 for .bgpx Services
-
-BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**.
-
-HTTP/2 is selected over HTTP/3 because:
-- BGP-X already provides reliable ordered delivery at the session layer
-- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
-- HTTP/3's QUIC would add redundant reliability and congestion control layers
-
-HTTP/3 is used at the exit node when connecting to HTTP/3 clearnet servers — this is standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
-
-For LoRa paths specifically: HTTP/2 multiplexing is critical. Each round-trip on LoRa costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
-
----
-
-## 15. Honest Competitive Positioning
+## 14. Honest Competitive Positioning
 
 BGP-X should not overclaim. The honest positioning:
 
@@ -425,7 +410,7 @@ BGP-X's value is in synthesis and unification, not in any single primitive.
 
 ---
 
-## 16. Key Architectural Summary
+## 15. Key Architectural Summary
 
 BGP-X unifies the fragmented privacy and mesh networking ecosystem by implementing a **routing domain model** where clearnet, BGP-X overlay, and mesh islands are equal first-class citizens.
 
