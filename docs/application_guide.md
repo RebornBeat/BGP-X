@@ -257,22 +257,7 @@ match sync_with_service(&mut stream, &local_db).await {
 
 ---
 
-## 4. HTTP/2 for .bgpx Services
-
-BGP-X native services (.bgpx addresses) use **HTTP/2 over BGP-X streams**.
-
-HTTP/2 is selected over HTTP/3 because:
-- BGP-X already provides reliable ordered delivery at the session layer
-- HTTP/2's multiplexing provides stream parallelism over a single BGP-X path
-- HTTP/3's QUIC would add redundant reliability and congestion control layers
-
-HTTP/3 is used at exit nodes when connecting to HTTP/3 clearnet servers — standard HTTP/3 over TLS over the exit's clearnet connection, not over BGP-X streams.
-
-For LoRa paths: HTTP/2 multiplexing is critical. Each round-trip costs 1-5 seconds. HTTP/2 allows fetching multiple resources in parallel streams without additional round-trips.
-
----
-
-## 5. Opening a Stream — Clearnet
+## 4. Opening a Stream — Clearnet
 
 ### Simple Connection
 
@@ -368,7 +353,7 @@ let stream = client.connect_stream_with_path(
 
 ---
 
-## 6. Connecting to .bgpx Services
+## 5. Connecting to .bgpx Services
 
 ### By Full ServiceID
 
@@ -391,7 +376,7 @@ let stream = client.connect_stream(
 
 ---
 
-## 7. Cross-Domain Streams
+## 6. Cross-Domain Streams
 
 ### Clearnet Client → Mesh Island Service
 
@@ -545,7 +530,7 @@ let stream = client.connect_stream_with_path(
 
 ---
 
-## 8. Registering a .bgpx Service
+## 7. Registering a .bgpx Service
 
 ### Server Side
 
@@ -613,7 +598,7 @@ let stream = client.connect_stream(
 
 ---
 
-## 9. HTTP Server for .bgpx Services
+## 8. HTTP Server for .bgpx Services
 
 ### Latency-Tolerant HTTP Response Headers
 
@@ -643,7 +628,7 @@ For services on LoRa-accessible mesh islands, minimize page weight:
 
 ---
 
-## 10. Domain and Island Discovery
+## 9. Domain and Island Discovery
 
 ```rust
 // List all known routing domains
@@ -675,7 +660,7 @@ println!("Best bridge latency: {}ms", result.best_bridge_latency_ms.unwrap_or(0)
 
 ---
 
-## 11. Pool Management
+## 10. Pool Management
 
 ```rust
 // Add a private pool (clearnet exit pool)
@@ -703,7 +688,7 @@ client.add_pool(Pool {
 
 ---
 
-## 12. Path Quality Events
+## 11. Path Quality Events
 
 ```rust
 let mut events = client.subscribe(&[
@@ -745,7 +730,7 @@ while let Some(event) = events.next().await {
 
 ---
 
-## 13. Identity Management
+## 12. Identity Management
 
 ### Ephemeral Identity (Default — Recommended)
 
@@ -773,7 +758,7 @@ let client = Client::connect_with_config(ClientConfig {
 
 ---
 
-## 14. ECH Requirements
+## 13. ECH Requirements
 
 ECH applies only to clearnet exit streams. Mesh island native services use BGP-X onion encryption end-to-end — no TLS ClientHello SNI to protect.
 
@@ -795,7 +780,7 @@ If `require_ech = true` and destination doesn't publish ECH configuration, strea
 
 ---
 
-## 15. Testing Without a Router
+## 14. Testing Without a Router
 
 ### Local Daemon
 
@@ -838,7 +823,7 @@ let client = Client::embedded(ClientConfig {
 
 ---
 
-## 16. Platform Notes
+## 15. Platform Notes
 
 ### Android
 
@@ -861,7 +846,7 @@ Target hardware:
 
 ---
 
-## 17. Hardware Ecosystem Reference
+## 16. Hardware Ecosystem Reference
 
 BGP-X applications run on the full hardware ecosystem:
 
