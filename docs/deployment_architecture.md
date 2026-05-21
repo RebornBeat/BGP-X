@@ -251,17 +251,13 @@ Mesh Community → [mesh hops] → Gateway → [clearnet relays] → Exit → De
 
 ### Mode 6: BGP-X Range Extension — BGP-X Node v1
 
-**DEPRECATED CONCEPT**: The earlier concept of a "BGP-X Amplifier v1" as a separate product category — a minimal LoRa repeater with no BGP-X routing intelligence — has been retired.
-
-**Replacement**: BGP-X Node v1 in Range Extension mode.
+BGP-X Node v1 in Range Extension mode.
 
 A BGP-X Node v1 in Range Extension mode:
 - Is a FULL BGP-X routing node (runs complete bgpx-node daemon)
 - Prioritizes forwarding traffic over originating sessions
 - Provides LoRa coverage extension
 - Maintains full BGP-X onion encryption at every hop
-
-**Why the amplifier was retired**: A pure LoRa PHY-level repeater with no BGP-X routing would relay traffic in an unencrypted intermediate state at the relay's PHY interface. This breaks end-to-end encryption. The Node v1 in Range Extension mode provides equivalent coverage while preserving all BGP-X security properties.
 
 **Configuration for Range Extension mode**:
 ```toml
